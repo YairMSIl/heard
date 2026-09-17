@@ -4,7 +4,14 @@ Hosted embeddable feedback widget on Cloudflare Workers + D1. See `README.md` fo
 
 ## Run it locally
 
+**Node 22 is required** (`.nvmrc`, and `engines` in `package.json`). The machine's
+default Node is 20 for other projects, so **every command in `app/` must run under 22**:
+`nvm use` from this directory, or prefix one-offs with `nvm exec 22 …`. Running `npm
+test` or `wrangler` under Node 20 fails with a module-resolution error rather than
+anything that names the real cause.
+
 ```bash
+nvm use            # reads .nvmrc -> 22
 npm install
 cp .dev.vars.example .dev.vars        # local ADMIN_TOKEN, SESSION_SECRET, OAuth placeholders
 npm run db:migrate:local              # applies migrations/ to the local D1 file
@@ -70,6 +77,8 @@ Typechecking runs three passes, and the split is load-bearing:
 | `test/` | vitest specs, one per `src/` module, plus the jsdom widget test |
 
 ## Deploying
+
+All of these run under Node 22 — `nvm use` first, or `nvm exec 22 wrangler …`.
 
 ```bash
 wrangler d1 create heard                  # once; put database_id in wrangler.toml

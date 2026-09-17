@@ -11,7 +11,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run typecheck
@@ -19,8 +19,7 @@ jobs:
       # Blocking: advisories in what actually ships to the Worker. The deployed
       # bundle is our source plus hono; everything else is build and test tooling.
       - run: npm audit --audit-level=high --omit=dev
-      # Informational: the full tree, including dev tooling. Not blocking, because
-      # clearing it currently needs a major vitest upgrade, and a CVE in a test
-      # runner cannot reach a deployed Worker — but it must stay visible.
-      - name: Audit dev toolchain (informational)
-        run: npm audit --audit-level=high || true
+      # The whole tree, dev tooling included. This was informational while the
+      # toolchain lagged behind Node 22; it is blocking now that it passes, so a
+      # regression is caught rather than noted.
+      - run: npm audit --audit-level=high
