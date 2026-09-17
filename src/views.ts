@@ -68,7 +68,7 @@ const STYLES = `
 export function layout(
   title: string,
   body: string,
-  opts: { nav?: boolean; who?: string | null } = {},
+  opts: { nav?: boolean; who?: string | null; widgetKey?: string | null } = {},
 ): string {
   const who = opts.who
     ? `<span class="who">${esc(opts.who)}
@@ -83,12 +83,18 @@ export function layout(
       <a href="/health">Health</a>
       ${who}
     </div></header>`
+  // Heard collecting feedback about Heard. Rendered only when the self site
+  // exists; a deployment without it simply has no widget rather than a broken
+  // script tag pointing at a key that resolves to nothing.
+  const widget = opts.widgetKey
+    ? `<script src="/widget.js?key=${encodeURIComponent(opts.widgetKey)}" defer><\/script>`
+    : ''
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)} · Heard</title>
 <style>${STYLES}</style>
-</head><body>${nav}<main>${body}</main></body></html>`
+</head><body>${nav}<main>${body}</main>${widget}</body></html>`
 }
 
 export function loginPage(error?: string, githubEnabled = true): string {
@@ -107,7 +113,7 @@ export function loginPage(error?: string, githubEnabled = true): string {
     </form>`, { nav: false })
 }
 
-export function sitesPage(sites: SiteRow[], who?: string | null): string {
+export function sitesPage(sites: SiteRow[], who?: string | null, widgetKey?: string | null): string {
   const list = sites.length
     ? sites.map(s => `
         <a class="site card tight" href="/sites/${esc(s.id)}">
@@ -118,10 +124,10 @@ export function sitesPage(sites: SiteRow[], who?: string | null): string {
   return layout('Sites', `
     <div class="between"><h1>Sites</h1><a href="/sites/new"><button>New site</button></a></div>
     <p class="sub">Each site gets a public key and its own embed snippet.</p>
-    ${list}`, { who })
+    ${list}`, { who, widgetKey })
 }
 
-export function newSitePage(error?: string, who?: string | null): string {
+export function newSitePage(error?: string, who?: string | null, widgetKey?: string | null): string {
   return layout('New site', `
     <h1>New site</h1>
     <p class="sub">A public key is generated for you.</p>
@@ -130,7 +136,7 @@ export function newSitePage(error?: string, who?: string | null): string {
       <label for="name">Site name</label>
       <input id="name" name="name" type="text" placeholder="example.com" required autofocus>
       <p><button type="submit">Create site</button></p>
-    </form>`, { who })
+    </form>`, { who, widgetKey })
 }
 
 function reportCard(report: ReportRow): string {
@@ -161,6 +167,7 @@ export interface SitePageOptions {
   /** Present only on the one response that created it; never re-readable. */
   revealedSecret?: string | null
   who?: string | null
+  widgetKey?: string | null
   flash?: { ok?: string; error?: string }
 }
 
@@ -170,7 +177,7 @@ export function sitePage(
   origin: string,
   opts: SitePageOptions = {},
 ): string {
-  const { revealedSecret, who, flash } = opts
+  const { revealedSecret, who, widgetKey, flash } = opts
   const snippet = `<script src="${origin}/widget.js?key=${site.public_key}" defer><\/script>`
   const list = reports.length
     ? reports.map(reportCard).join('')
@@ -215,7 +222,7 @@ export function sitePage(
     </div>
 
     <h2>Reports (${reports.length})</h2>
-    ${list}`, { who })
+    ${list}`, { who, widgetKey })
 }
 
 export const REPO_URL = 'https://github.com/YairMSIl/heard'
@@ -226,7 +233,7 @@ export const ISSUES_URL = `${REPO_URL}/issues`
  * embed snippet is the product, so it appears above the fold rather than
  * behind a sign-up.
  */
-export function landingPage(origin: string): string {
+export function landingPage(origin: string, widgetKey?: string | null): string {
   const snippet = `<script src="${origin}/widget.js?key=YOUR_PUBLIC_KEY" defer><\/script>`
   return layout('Feedback your visitors can actually send', `
     <div class="hero">
@@ -261,7 +268,8 @@ export function landingPage(origin: string): string {
       Heard is designed, built, deployed and operated autonomously by an AI agent &mdash;
       the source is public at <a href="${REPO_URL}">github.com/YairMSIl/heard</a>.
       Support: <a href="${ISSUES_URL}">GitHub Issues</a>.
-    </p>`, { nav: false })
+      ${widgetKey ? 'Found a problem on this page? The Feedback button in the corner reports it to Heard itself.' : ''}
+    </p>`, { nav: false, widgetKey })
 }
 
 export function errorPage(status: number, message: string): string {

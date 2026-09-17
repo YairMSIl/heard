@@ -24,12 +24,28 @@ const ADMIN_COOKIE = 'heard_admin'
 const SESSION_COOKIE = 'heard_session'
 const OAUTH_STATE_COOKIE = 'heard_oauth_state'
 const LOCAL_OWNER_ID = 'own_local'
+const SELF_SITE_ID = 'site_self'
 
 type Vars = { ownerId: string; ownerLabel: string }
 
 const app = new Hono<{ Bindings: Env; Variables: Vars }>()
 
 const isHttps = (url: string) => new URL(url).protocol === 'https:'
+
+/**
+ * The public key of Heard's own feedback site, so Heard's pages can carry the
+ * widget. Returns null rather than throwing if the row is missing, because a
+ * missing self site must degrade to "no widget", never to a broken page.
+ */
+async function selfWidgetKey(env: Env): Promise<string | null> {
+  try {
+    const row = await env.DB.prepare('SELECT public_key FROM sites WHERE id = ?')
+      .bind(SELF_SITE_ID).first<{ public_key: string }>()
+    return row?.public_key ?? null
+  } catch {
+    return null
+  }
+}
 
 /* ------------------------------------------------------------------ public */
 
@@ -316,17 +332,18 @@ app.use('/reports/*', requireAuth)
 
 app.get('/', async c => {
   if (await resolveOwner(c)) return c.redirect('/sites', 302)
-  return c.html(landingPage(new URL(c.req.url).origin))
+  return c.html(landingPage(new URL(c.req.url).origin, await selfWidgetKey(c.env)))
 })
 
 app.get('/sites', async c => {
   const { results } = await c.env.DB
     .prepare('SELECT * FROM sites WHERE owner_id = ? ORDER BY created_at DESC')
     .bind(c.get('ownerId')).all<SiteRow>()
-  return c.html(sitesPage(results ?? [], c.get('ownerLabel')))
+  return c.html(sitesPage(results ?? [], c.get('ownerLabel'), await selfWidgetKey(c.env)))
 })
 
-app.get('/sites/new', c => c.html(newSitePage(undefined, c.get('ownerLabel'))))
+app.get('/sites/new', async c =>
+  c.html(newSitePage(undefined, c.get('ownerLabel'), await selfWidgetKey(c.env))))
 
 app.post('/sites/new', async c => {
   const form = await c.req.formData()
@@ -358,6 +375,7 @@ app.get('/sites/:id', async c => {
   if (!site) return c.html(errorPage(404, 'No such site.'), 404)
   return c.html(sitePage(site, await loadReports(c, site.id), new URL(c.req.url).origin, {
     who: c.get('ownerLabel'),
+    widgetKey: await selfWidgetKey(c.env),
     flash: c.req.query('saved') ? { ok: 'Saved.' } : undefined,
   }))
 })

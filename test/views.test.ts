@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { esc, landingPage, sitePage } from '../src/views'
+import { esc, landingPage, newSitePage, sitePage, sitesPage } from '../src/views'
 import type { ReportRow, SiteRow } from '../src/types'
 
 const site: SiteRow = {
@@ -71,9 +71,10 @@ describe('landingPage', () => {
 
   it('shows the embed snippet with a placeholder key, escaped', () => {
     expect(html).toContain('https://heard.example.com/widget.js?key=YOUR_PUBLIC_KEY')
-    // The snippet must render as text, not execute as a tag.
+    // The snippet must render as text, not execute as a tag: the placeholder
+    // key may never appear inside a live <script src="...">.
     expect(html).toContain('&lt;script src=')
-    expect(html).not.toContain('<script src="https://heard.example.com/widget.js')
+    expect(html).not.toMatch(/<script src="[^"]*YOUR_PUBLIC_KEY/)
   })
 
   it('offers GitHub sign-in and the demo', () => {
@@ -89,5 +90,43 @@ describe('landingPage', () => {
 
   it('does not show the signed-in navigation', () => {
     expect(html).not.toContain('href="/sites"')
+  })
+
+  it('carries no widget when the self site does not exist', () => {
+    expect(html).not.toContain('<script src="/widget.js')
+    expect(html).not.toMatch(/Feedback button in the corner/)
+  })
+})
+
+describe('the self-feedback widget (dogfooding)', () => {
+  const key = 'pk_selfsite123'
+
+  it('embeds a live widget tag on the landing page when a key is given', () => {
+    const html = landingPage('https://heard.example.com', key)
+    expect(html).toContain(`<script src="/widget.js?key=${key}" defer></script>`)
+    expect(html).toMatch(/Feedback button in the corner/)
+  })
+
+  it('embeds it on the dashboard pages too', () => {
+    expect(sitesPage([], '@octocat', key)).toContain(`/widget.js?key=${key}`)
+    expect(newSitePage(undefined, '@octocat', key)).toContain(`/widget.js?key=${key}`)
+    expect(sitePage(site, [], 'https://h.test', { widgetKey: key })).toContain(`/widget.js?key=${key}`)
+  })
+
+  it('omits it everywhere when there is no self site', () => {
+    for (const html of [
+      landingPage('https://h.test', null),
+      sitesPage([], '@octocat', null),
+      newSitePage(undefined, '@octocat', null),
+      sitePage(site, [], 'https://h.test', {}),
+    ]) {
+      expect(html).not.toContain('<script src="/widget.js')
+    }
+  })
+
+  it('url-encodes the key rather than trusting it into an attribute', () => {
+    const html = landingPage('https://h.test', 'pk_a b"c')
+    expect(html).toContain('/widget.js?key=pk_a%20b%22c')
+    expect(html).not.toContain('pk_a b"c')
   })
 })
