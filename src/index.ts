@@ -8,7 +8,7 @@ import { newPublicKey, newReportId, newSiteId, newWebhookSecret, randomId } from
 import { reportRateLimiter } from './ratelimit'
 import { truncateUserAgent, validateReportInput, validateWebhookUrl } from './validation'
 import { buildWebhookPayload, deliverWebhook } from './webhook'
-import { pruneReports } from './retention'
+import { describePruneFreshness, LAST_PRUNE_KEY, pruneReports } from './retention'
 import {
   createSession,
   exchangeCodeForToken,
@@ -36,14 +36,27 @@ const isHttps = (url: string) => new URL(url).protocol === 'https:'
 app.get('/health', async c => {
   let db: 'ok' | 'error' = 'ok'
   let detail: string | undefined
+  // A stale cron is reported, never judged here: `status` stays 'ok' so the
+  // uptime sensor keeps deciding what is worth waking someone for.
+  let freshness = describePruneFreshness(null)
+
   try {
-    await c.env.DB.prepare('SELECT 1').first()
+    const row = await c.env.DB.prepare('SELECT value FROM meta WHERE key = ?')
+      .bind(LAST_PRUNE_KEY).first<{ value: string }>()
+    freshness = describePruneFreshness(row?.value ?? null)
   } catch (err) {
     db = 'error'
     detail = err instanceof Error ? err.message : String(err)
   }
-  return c.json({ status: db === 'ok' ? 'ok' : 'degraded', db, detail, time: new Date().toISOString() },
-    db === 'ok' ? 200 : 503)
+
+  return c.json({
+    status: db === 'ok' ? 'ok' : 'degraded',
+    db,
+    detail,
+    lastPruneAt: freshness.lastPruneAt,
+    pruneAgeHours: freshness.pruneAgeHours,
+    time: new Date().toISOString(),
+  }, db === 'ok' ? 200 : 503)
 })
 
 app.get('/widget.js', c =>

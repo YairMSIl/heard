@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { DEMO_RETENTION_HOURS, DONE_RETENTION_DAYS, pruneReports } from '../src/retention'
+import {
+  DEMO_RETENTION_HOURS,
+  DONE_RETENTION_DAYS,
+  LAST_PRUNE_COUNTS_KEY,
+  LAST_PRUNE_KEY,
+  describePruneFreshness,
+  pruneReports,
+} from '../src/retention'
 import type { Env } from '../src/types'
 
 interface Call { sql: string; args: unknown[] }
@@ -47,7 +54,7 @@ describe('pruneReports', () => {
   it('never touches new or in-progress reports', async () => {
     const { env, calls } = fakeDb()
     await pruneReports(env, NOW)
-    for (const call of calls) {
+    for (const call of calls.filter(c => c.sql.startsWith('DELETE'))) {
       expect(call.sql).not.toContain('in-progress')
       expect(call.sql).not.toMatch(/status\s*=\s*'new'/)
     }
@@ -73,5 +80,59 @@ describe('pruneReports', () => {
     const { env } = fakeDb()
     const { doneCutoff, demoCutoff } = await pruneReports(env, NOW)
     expect(demoCutoff).toBeGreaterThan(doneCutoff)
+  })
+
+  it('records that it ran, after the deletes', async () => {
+    const { env, calls } = fakeDb()
+    await pruneReports(env, NOW)
+
+    const meta = calls.filter(c => c.sql.includes('INSERT INTO meta'))
+    expect(meta).toHaveLength(2)
+    // Order matters: the marker must not claim a run that then failed.
+    expect(calls.indexOf(meta[0])).toBeGreaterThan(calls.findIndex(c => c.sql.startsWith('DELETE')))
+
+    expect(meta[0].args).toEqual([LAST_PRUNE_KEY, new Date(NOW).toISOString(), NOW])
+    expect(meta[0].sql).toContain('ON CONFLICT(key) DO UPDATE')
+  })
+
+  it('records the counts alongside the timestamp', async () => {
+    const { env, calls } = fakeDb()
+    await pruneReports(env, NOW)
+    const counts = calls.find(c => c.args[0] === LAST_PRUNE_COUNTS_KEY)!
+    expect(JSON.parse(counts.args[1] as string)).toEqual({ doneDeleted: 3, demoDeleted: 7 })
+  })
+
+  it('still records a run that deleted nothing', async () => {
+    const { env, calls } = fakeDb([0, 0])
+    await pruneReports(env, NOW)
+    const counts = calls.find(c => c.args[0] === LAST_PRUNE_COUNTS_KEY)!
+    expect(JSON.parse(counts.args[1] as string)).toEqual({ doneDeleted: 0, demoDeleted: 0 })
+    expect(calls.some(c => c.args[0] === LAST_PRUNE_KEY)).toBe(true)
+  })
+})
+
+describe('describePruneFreshness', () => {
+  const NOW_MS = Date.parse('2026-09-17T12:00:00.000Z')
+
+  it('reports null for a cron that has never run', () => {
+    expect(describePruneFreshness(null, NOW_MS)).toEqual({ lastPruneAt: null, pruneAgeHours: null })
+    expect(describePruneFreshness(undefined, NOW_MS)).toEqual({ lastPruneAt: null, pruneAgeHours: null })
+    expect(describePruneFreshness('', NOW_MS)).toEqual({ lastPruneAt: null, pruneAgeHours: null })
+  })
+
+  it('reads an unparseable value as unknown, not as fresh', () => {
+    expect(describePruneFreshness('last tuesday', NOW_MS)).toEqual({ lastPruneAt: null, pruneAgeHours: null })
+  })
+
+  it('computes the age in hours to one decimal', () => {
+    expect(describePruneFreshness('2026-09-17T09:30:00.000Z', NOW_MS))
+      .toEqual({ lastPruneAt: '2026-09-17T09:30:00.000Z', pruneAgeHours: 2.5 })
+  })
+
+  it('crosses the 26-hour staleness line the sensor watches', () => {
+    const fresh = describePruneFreshness('2026-09-16T11:00:00.000Z', NOW_MS)
+    const stale = describePruneFreshness('2026-09-16T09:00:00.000Z', NOW_MS)
+    expect(fresh.pruneAgeHours).toBe(25)
+    expect(stale.pruneAgeHours).toBe(27)
   })
 })
