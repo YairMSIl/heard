@@ -29,10 +29,13 @@ import {
   verifySession,
 } from './auth'
 import {
+  ADMIN_WARNING,
+  UNTRUSTED_SOURCE,
   authorizeAdmin,
   isAdminAllowedSite,
   parseAdminReportQuery,
   parseAdminStatus,
+  quoteUntrusted,
 } from './admin'
 import { errorPage, landingPage, loginPage, newSitePage, sitePage, sitesPage } from './views'
 import { securityHeaders } from './security-headers'
@@ -268,8 +271,15 @@ app.get('/api/admin/reports', async c => {
      FROM reports WHERE ${conditions.join(' AND ')} ORDER BY created_at ASC LIMIT ?`,
   ).bind(...bindings, limit).all<ReportRow>()
 
-  const reports = (results ?? []).map(r => ({ ...r, created_at_iso: new Date(r.created_at).toISOString() }))
-  return c.json({ site, count: reports.length, reports })
+  // Provenance travels with the data. It costs nothing and, unlike a filter, it
+  // survives being pasted into a transcript.
+  const reports = (results ?? []).map(r => ({
+    ...r,
+    message: quoteUntrusted(r.message),
+    created_at_iso: new Date(r.created_at).toISOString(),
+    source: UNTRUSTED_SOURCE,
+  }))
+  return c.json({ site, count: reports.length, warning: ADMIN_WARNING, reports })
 })
 
 app.post('/api/admin/reports/:id/status', async c => {
