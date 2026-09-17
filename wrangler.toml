@@ -2,6 +2,12 @@ name = "heard"
 main = "src/index.ts"
 compatibility_date = "2025-09-01"
 
+# Served at https://heard.yairms.workers.dev.
+workers_dev = true
+# Preview URLs are off: they would expose every uploaded version at a public
+# hostname while bound to the *production* D1 database.
+preview_urls = false
+
 # ADMIN_TOKEN is a secret in production:
 #   wrangler secret put ADMIN_TOKEN
 # For local dev it is read from .dev.vars (gitignored, see .dev.vars.example).

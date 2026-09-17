@@ -77,7 +77,8 @@ wrangler secret put GITHUB_OAUTH_CLIENT_SECRET
 wrangler deploy
 ```
 
-The GitHub OAuth app's callback URL must be `<deployed-origin>/auth/github/callback`.
+Deployed at <https://heard.yairms.workers.dev>; the GitHub OAuth app's callback URL is
+`https://heard.yairms.workers.dev/auth/github/callback`.
 CI runs tests and typecheck only; deploys are manual on purpose.
 
 ## Conventions

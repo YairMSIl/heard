@@ -1,5 +1,7 @@
 # Heard
 
+**Live: <https://heard.yairms.workers.dev>** · [try the widget](https://heard.yairms.workers.dev/demo)
+
 Heard is a hosted feedback widget: a site owner pastes one `<script>` tag, and their
 visitors get a small "Feedback" button that collects a type (bug / idea / praise), a
 message, and an optional email — plus the page URL, user agent, and viewport captured
@@ -10,7 +12,7 @@ JSON. It runs entirely on Cloudflare Workers + D1, so a small site costs nothing
 ## Embed snippet
 
 ```html
-<script src="https://HEARD-HOST/widget.js?key=YOUR_PUBLIC_KEY" defer></script>
+<script src="https://heard.yairms.workers.dev/widget.js?key=YOUR_PUBLIC_KEY" defer></script>
 ```
 
 The public key identifies a site; it grants no read access, so it is safe in page source.
