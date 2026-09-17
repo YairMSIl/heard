@@ -17,7 +17,8 @@ import {
   validateReportInput,
   validateWebhookUrl,
 } from './validation'
-import { buildRateLimitedPayload, buildWebhookPayload, deliverWebhook } from './webhook'
+import { buildRateLimitedPayload, buildWebhookPayload, verifyWebhookTarget } from './webhook'
+import { deliverAndRecord } from './webhook-delivery'
 import { describePruneFreshness, LAST_PRUNE_KEY, pruneReports } from './retention'
 import {
   createSession,
@@ -159,13 +160,9 @@ app.post('/api/report', async c => {
   if (!siteLimit.allowed) {
     const blocked = siteLimit.usage.find(u => u.name === siteLimit.blockedWindow)
     if (siteLimit.notify && site.webhook_url && blocked) {
-      c.executionCtx.waitUntil(deliverWebhook(
-        site.webhook_url,
-        buildRateLimitedPayload(site, {
-          window: blocked.name, limit: blocked.limit, count: blocked.count, resetAt: blocked.resetAt,
-        }),
-        site.webhook_secret,
-      ))
+      c.executionCtx.waitUntil(deliverAndRecord(c.env, site, buildRateLimitedPayload(site, {
+        window: blocked.name, limit: blocked.limit, count: blocked.count, resetAt: blocked.resetAt,
+      })))
     }
     return tooMany(c, siteLimit.retryAfterSeconds,
       'This site is not accepting more feedback right now. Please try again later.')
@@ -194,9 +191,7 @@ app.post('/api/report', async c => {
     report.page_url, report.user_agent, report.viewport, report.status, report.created_at).run()
 
   if (site.webhook_url) {
-    c.executionCtx.waitUntil(
-      deliverWebhook(site.webhook_url, buildWebhookPayload(site.name, report), site.webhook_secret),
-    )
+    c.executionCtx.waitUntil(deliverAndRecord(c.env, site, buildWebhookPayload(site.name, report)))
   }
 
   return c.json({ ok: true, id: report.id }, 201)
@@ -527,10 +522,31 @@ app.post('/sites/:id/webhook', async c => {
   if (!site) return c.html(errorPage(404, 'No such site.'), 404)
 
   const form = await c.req.formData()
-  const parsed = validateWebhookUrl(String(form.get('webhook_url') ?? ''))
+  const selfOrigin = new URL(c.req.url).origin
+  const parsed = validateWebhookUrl(String(form.get('webhook_url') ?? ''), selfOrigin)
   if (!parsed.ok) return c.html(await renderSite(c, site, { error: parsed.error }), 400)
-  await c.env.DB.prepare('UPDATE sites SET webhook_url = ? WHERE id = ?')
-    .bind(parsed.value, site.id).run()
+
+  if (parsed.value === null) {
+    await c.env.DB.prepare(
+      'UPDATE sites SET webhook_url = NULL, webhook_failures = 0, webhook_disabled_at = NULL, webhook_verified_at = NULL WHERE id = ?',
+    ).bind(site.id).run()
+    return c.redirect(`/sites/${site.id}?saved=1`, 302)
+  }
+
+  // Consent from the destination, not from whoever typed the URL: the endpoint
+  // must echo a value it could only have learned by receiving our request.
+  const challenge = randomId(24)
+  const verified = await verifyWebhookTarget(parsed.value, challenge, site.webhook_secret)
+  if (!verified.ok) {
+    return c.html(await renderSite(c, site, {
+      error: `That endpoint did not confirm it wants deliveries: ${verified.error}. `
+        + 'Heard sends {"event":"webhook.challenge","challenge":"..."} and expects the challenge value echoed in a 2xx response body.',
+    }), 400)
+  }
+
+  await c.env.DB.prepare(
+    'UPDATE sites SET webhook_url = ?, webhook_failures = 0, webhook_disabled_at = NULL, webhook_verified_at = ? WHERE id = ?',
+  ).bind(parsed.value, Date.now(), site.id).run()
   return c.redirect(`/sites/${site.id}?saved=1`, 302)
 })
 

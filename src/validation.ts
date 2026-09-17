@@ -88,6 +88,36 @@ export function truncateUserAgent(value: string | null | undefined): string | nu
   return optional(value, MAX_USER_AGENT_LENGTH)
 }
 
+/**
+ * Hosts a webhook may never point at. Heard fetches these URLs itself, from
+ * inside Cloudflare's network, so an owner-supplied URL is a request we make on
+ * a stranger's behalf: the classic SSRF shape. Literal private, loopback,
+ * link-local, CGNAT and IPv6 ULA addresses are refused outright.
+ *
+ * This is not complete protection — a hostname that resolves to a private
+ * address still passes, because we do not resolve DNS here. It removes the
+ * trivial cases; the delivery cap and auto-disable below remove the value of
+ * the rest.
+ */
+function isPrivateHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return true
+  if (host === '::1' || host === '0.0.0.0') return true
+  // IPv6 unique-local (fc00::/7) and link-local (fe80::/10).
+  if (/^f[cd][0-9a-f]{2}:/.test(host) || /^fe[89ab][0-9a-f]:/.test(host)) return true
+
+  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])]
+    if (a === 10 || a === 127 || a === 0) return true
+    if (a === 192 && b === 168) return true
+    if (a === 172 && b >= 16 && b <= 31) return true
+    if (a === 169 && b === 254) return true       // link-local / cloud metadata
+    if (a === 100 && b >= 64 && b <= 127) return true // CGNAT
+  }
+  return false
+}
+
 /** Only http(s) webhooks; anything else is a misconfiguration or an SSRF attempt. */
 export type UrlResult = { ok: true; value: string | null } | { ok: false; error: string }
 
@@ -154,7 +184,7 @@ export function parseCap(input: unknown): { ok: true; value: number | null } | {
   return { ok: true, value: n }
 }
 
-export function validateWebhookUrl(value: string | null | undefined): UrlResult {
+export function validateWebhookUrl(value: string | null | undefined, selfOrigin?: string): UrlResult {
   const raw = asString(value)?.trim()
   if (!raw) return { ok: true, value: null }
   let url: URL
@@ -167,5 +197,12 @@ export function validateWebhookUrl(value: string | null | undefined): UrlResult 
     return { ok: false, error: 'webhook url must be http or https' }
   }
   if (raw.length > MAX_URL_LENGTH) return { ok: false, error: 'webhook url is too long' }
+  if (isPrivateHost(url.hostname)) {
+    return { ok: false, error: 'webhook url must point at a public address, not a private or loopback one' }
+  }
+  // Pointing Heard at itself is a loop or a probe, never a real configuration.
+  if (selfOrigin && url.origin === selfOrigin) {
+    return { ok: false, error: 'webhook url cannot point back at Heard' }
+  }
   return { ok: true, value: url.toString() }
 }

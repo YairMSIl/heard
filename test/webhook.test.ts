@@ -71,9 +71,19 @@ describe('deliverWebhook', () => {
     vi.unstubAllGlobals()
   })
 
-  it('never rejects when the receiver fails', async () => {
+  it('never rejects when the receiver fails — it reports false instead', async () => {
+    // The caller counts consecutive failures, so the outcome must be visible;
+    // it still must never throw into the visitor's request path.
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')))
-    await expect(deliverWebhook('https://hook.test/x', buildWebhookPayload('E', report))).resolves.toBeUndefined()
+    await expect(deliverWebhook('https://hook.test/x', buildWebhookPayload('E', report))).resolves.toBe(false)
+    vi.unstubAllGlobals()
+  })
+
+  it('reports true only for a 2xx', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('ok', { status: 200 })))
+    await expect(deliverWebhook('https://hook.test/x', buildWebhookPayload('E', report))).resolves.toBe(true)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('nope', { status: 500 })))
+    await expect(deliverWebhook('https://hook.test/x', buildWebhookPayload('E', report))).resolves.toBe(false)
     vi.unstubAllGlobals()
   })
 })

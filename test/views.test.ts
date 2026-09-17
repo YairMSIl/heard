@@ -4,7 +4,8 @@ import type { ReportRow, SiteRow } from '../src/types'
 
 const site: SiteRow = {
   id: 'site_1', owner_id: 'own_local', name: 'Example', public_key: 'pk_abc',
-  webhook_url: null, webhook_secret: null, hourly_cap: null, daily_cap: null, allowed_origins: null, created_at: 0,
+  webhook_url: null, webhook_secret: null, hourly_cap: null, daily_cap: null, allowed_origins: null,
+  webhook_failures: 0, webhook_disabled_at: null, webhook_verified_at: null, created_at: 0,
 }
 
 describe('esc', () => {
@@ -72,6 +73,16 @@ describe('sitePage', () => {
     const html = sitePage(site, [], 'https://h.test', { caps: { hourly: 30, daily: 200 } })
     expect(html).toMatch(/usage is unavailable/i)
     expect(html).toContain('30/hour and 200/day')
+  })
+
+  it('warns on the dashboard when a webhook was auto-disabled', () => {
+    const html = sitePage({ ...site, webhook_disabled_at: Date.parse('2026-09-17T12:00:00Z') }, [], 'https://h.test')
+    expect(html).toMatch(/switched off after 10 consecutive failed deliveries/)
+    expect(html).toContain('2026-09-17 12:00')
+  })
+
+  it('says nothing about disabling when the webhook is healthy', () => {
+    expect(sitePage(site, [], 'https://h.test')).not.toMatch(/switched off/)
   })
 
   it('shows who is signed in and a sign-out control', () => {

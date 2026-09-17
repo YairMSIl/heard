@@ -239,10 +239,21 @@ export function sitePage(
     </form>
 
     <h2>Webhook</h2>
+    ${site.webhook_disabled_at
+      ? `<div class="err">This webhook was switched off after 10 consecutive failed deliveries
+           (${esc(new Date(site.webhook_disabled_at).toISOString().slice(0, 16).replace('T', ' '))} UTC).
+           Fix the endpoint and save the URL again to re-enable it.</div>`
+      : ''}
     <form class="card" method="post" action="/sites/${esc(site.id)}/webhook">
       <label for="webhook_url">POST each new report to this URL (optional)</label>
       <input id="webhook_url" name="webhook_url" type="url" placeholder="https://example.com/hooks/feedback"
              value="${esc(site.webhook_url ?? '')}">
+      <p class="meta">On save, Heard POSTs
+        <code>{"event":"webhook.challenge","challenge":"…"}</code> and your endpoint must
+        echo the challenge value in a 2xx body. Deliveries are capped at 60/hour and stop
+        after 10 consecutive failures.${site.webhook_verified_at
+          ? ` Verified ${esc(new Date(site.webhook_verified_at).toISOString().slice(0, 16).replace('T', ' '))} UTC.`
+          : ''}</p>
       <p><button type="submit">Save webhook</button></p>
     </form>
 

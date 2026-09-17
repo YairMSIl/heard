@@ -89,9 +89,13 @@ describe('validateWebhookUrl', () => {
     expect(validateWebhookUrl('')).toEqual({ ok: true, value: null })
     expect(validateWebhookUrl(null)).toEqual({ ok: true, value: null })
   })
-  it('accepts http and https', () => {
+  it('accepts http and https public endpoints', () => {
     expect(validateWebhookUrl('https://example.com/hook')).toMatchObject({ ok: true })
-    expect(validateWebhookUrl('http://localhost:8787/hook')).toMatchObject({ ok: true })
+    expect(validateWebhookUrl('http://example.com:8787/hook')).toMatchObject({ ok: true })
+  })
+
+  it('no longer accepts localhost, which used to be allowed (see test/webhook-safety.test.ts)', () => {
+    expect(validateWebhookUrl('http://localhost:8787/hook')).toMatchObject({ ok: false })
   })
   it('rejects other schemes and garbage', () => {
     for (const url of ['javascript:alert(1)', 'file:///etc/passwd', 'ftp://x.com', 'not a url']) {

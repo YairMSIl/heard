@@ -34,6 +34,9 @@ export interface SiteRow {
   hourly_cap: number | null
   daily_cap: number | null
   allowed_origins: string | null
+  webhook_failures: number
+  webhook_disabled_at: number | null
+  webhook_verified_at: number | null
   created_at: number
 }
 
