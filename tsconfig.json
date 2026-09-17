@@ -11,5 +11,9 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  // The Worker runtime has no DOM. test/widget-dom.test.ts runs in jsdom and is
+  // checked separately by tsconfig.dom.json, because pulling lib.dom into this
+  // config would collide with @cloudflare/workers-types.
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "exclude": ["test/widget-dom.test.ts"]
 }

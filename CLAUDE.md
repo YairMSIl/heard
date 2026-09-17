@@ -30,10 +30,15 @@ npm run typecheck # tsc --noEmit
 ```
 
 The suite covers the pure logic: input validation, rate limiting, webhook payload
-shaping and failure-swallowing, HTML escaping, and widget size/syntax. Route behaviour
-is verified by hand against `wrangler dev` (see the curl loop in the repo history) —
-if route tests become worth automating, add `@cloudflare/vitest-pool-workers` rather
-than mocking D1.
+shaping and failure-swallowing, and HTML escaping. `test/widget-dom.test.ts` runs the
+real widget source inside jsdom — it embeds it the way a host page does and drives the
+UI — so widget regressions fail the build rather than the demo.
+
+Route behaviour is verified by hand against `wrangler dev` with curl. If route tests
+become worth automating, add `@cloudflare/vitest-pool-workers` rather than mocking D1.
+
+Typechecking runs twice: `tsconfig.json` for Worker code (no `lib.dom`, which would
+collide with `@cloudflare/workers-types`) and `tsconfig.dom.json` for the jsdom test.
 
 ## Layout
 
@@ -46,7 +51,7 @@ than mocking D1.
 | `src/ratelimit.ts` | In-memory fixed-window limiter |
 | `src/webhook.ts` | Outbound payload shape and delivery |
 | `migrations/` | D1 schema; `0002` seeds the demo owner + site |
-| `test/` | vitest specs, one per `src/` module |
+| `test/` | vitest specs, one per `src/` module, plus the jsdom widget test |
 
 ## Conventions
 
