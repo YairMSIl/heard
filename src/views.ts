@@ -58,6 +58,8 @@ const STYLES = `
   .usage:last-of-type{margin-bottom:6px}
   .bar{height:6px;border-radius:3px;background:#e5e7eb;overflow:hidden;margin-top:6px}
   .bar span{display:block;height:100%;background:var(--ink)}
+  button.danger{background:#b91c1c}
+  button.ghost.danger{background:#fff;color:#b91c1c;border-color:#fca5a5}
   .hero{padding:64px 0 8px}
   .hero h1{font-size:40px;line-height:1.1;letter-spacing:-.02em;margin:0 0 14px}
   .lede{font-size:17px;color:#374151;max-width:38em;margin:0 0 28px}
@@ -120,7 +122,12 @@ export function loginPage(error?: string, githubEnabled = true): string {
     </form>`, { nav: false })
 }
 
-export function sitesPage(sites: SiteRow[], who?: string | null, widgetKey?: string | null): string {
+export function sitesPage(
+  sites: SiteRow[],
+  who?: string | null,
+  widgetKey?: string | null,
+  flash?: string,
+): string {
   const list = sites.length
     ? sites.map(s => `
         <a class="site card tight" href="/sites/${esc(s.id)}">
@@ -129,6 +136,7 @@ export function sitesPage(sites: SiteRow[], who?: string | null, widgetKey?: str
         </a>`).join('')
     : '<div class="card empty">No sites yet. Create your first one.</div>'
   return layout('Sites', `
+    ${flash ? `<div class="ok">${esc(flash)}</div>` : ''}
     <div class="between"><h1>Sites</h1><a href="/sites/new"><button>New site</button></a></div>
     <p class="sub">Each site gets a public key and its own embed snippet.</p>
     ${list}`, { who, widgetKey })
@@ -166,7 +174,12 @@ function reportCard(report: ReportRow): string {
       ${report.viewport ? `${esc(report.viewport)} · ` : ''}
       ${esc(report.user_agent ?? '')}
     </p>
-    <div class="row">${buttons}</div>
+    <div class="row">${buttons}
+      <form class="inline" method="post" action="/reports/${esc(report.id)}/delete"
+            onsubmit="return confirm('Delete this report permanently?')">
+        <button class="ghost danger" type="submit">delete</button>
+      </form>
+    </div>
   </div>`
 }
 
@@ -272,7 +285,14 @@ export function sitePage(
     ${usageBlock(usage, caps)}
 
     <h2>Reports (${reports.length})</h2>
-    ${list}`, { who, widgetKey })
+    ${list}
+
+    <h2>Danger zone</h2>
+    <div class="card">
+      <p class="meta">Deleting this site removes its reports permanently. Nobody can
+        recover them afterwards, including us.</p>
+      <p><a href="/sites/${esc(site.id)}/delete"><button class="danger" type="button">Delete this site</button></a></p>
+    </div>`, { who, widgetKey })
 }
 
 /**
@@ -346,6 +366,26 @@ export function landingPage(origin: string, widgetKey?: string | null): string {
       Support: <a href="${ISSUES_URL}">GitHub Issues</a>.
       ${widgetKey ? 'Found a problem on this page? The Feedback button in the corner reports it to Heard itself.' : ''}
     </p>`, { nav: false, widgetKey })
+}
+
+export function confirmDeleteSitePage(
+  site: SiteRow,
+  reportCount: number,
+  who?: string | null,
+  error?: string,
+): string {
+  return layout(`Delete ${site.name}`, `
+    <h1>Delete ${esc(site.name)}?</h1>
+    <p class="sub">This removes the site, its public key and
+      ${esc(reportCount)} report${reportCount === 1 ? '' : 's'}. It cannot be undone, and
+      the widget on your pages will stop working immediately.</p>
+    ${error ? `<div class="err">${esc(error)}</div>` : ''}
+    <form class="card" method="post" action="/sites/${esc(site.id)}/delete">
+      <label for="confirm">Type the site name to confirm: <code>${esc(site.name)}</code></label>
+      <input id="confirm" name="confirm" type="text" autocomplete="off" autofocus>
+      <p><button class="danger" type="submit">Delete permanently</button>
+         <a href="/sites/${esc(site.id)}" class="meta" style="margin-left:12px">Cancel</a></p>
+    </form>`, { who })
 }
 
 export function errorPage(status: number, message: string): string {

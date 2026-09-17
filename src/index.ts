@@ -45,7 +45,15 @@ import {
   parseAdminStatus,
   quoteUntrusted,
 } from './admin'
-import { errorPage, landingPage, loginPage, newSitePage, sitePage, sitesPage } from './views'
+import {
+  confirmDeleteSitePage,
+  errorPage,
+  landingPage,
+  loginPage,
+  newSitePage,
+  sitePage,
+  sitesPage,
+} from './views'
 import { securityHeaders } from './security-headers'
 import { WIDGET_JS } from './widget'
 
@@ -518,7 +526,8 @@ app.get('/sites', async c => {
   const { results } = await c.env.DB
     .prepare('SELECT * FROM sites WHERE owner_id = ? ORDER BY created_at DESC')
     .bind(c.get('ownerId')).all<SiteRow>()
-  return c.html(sitesPage(results ?? [], c.get('ownerLabel'), await selfWidgetKey(c.env)))
+  return c.html(sitesPage(results ?? [], c.get('ownerLabel'), await selfWidgetKey(c.env),
+    c.req.query('deleted') === 'site' ? 'Site deleted, along with all of its reports.' : undefined))
 })
 
 app.get('/sites/new', async c =>
@@ -536,7 +545,8 @@ app.post('/sites/new', async c => {
     .bind(c.get('ownerId')).first<{ n: number }>()
   if ((existing?.n ?? 0) >= SITES_PER_OWNER) {
     return c.html(newSitePage(
-      `You have reached the limit of ${SITES_PER_OWNER} sites. Delete one, or ask us to raise it.`,
+      `You have reached the limit of ${SITES_PER_OWNER} sites. Open a site you no longer `
+      + 'need and use "Delete this site" at the bottom of its page, then try again.',
       c.get('ownerLabel'), await selfWidgetKey(c.env)), 403)
   }
 
@@ -577,7 +587,12 @@ async function renderSite(
 app.get('/sites/:id', async c => {
   const site = await loadSite(c, c.req.param('id'), c.get('ownerId'))
   if (!site) return c.html(errorPage(404, 'No such site.'), 404)
-  return c.html(await renderSite(c, site, c.req.query('saved') ? { ok: 'Saved.' } : {}))
+  const flash = c.req.query('saved')
+    ? { ok: 'Saved.' }
+    : c.req.query('deleted') === 'report'
+      ? { ok: 'Report deleted.' }
+      : {}
+  return c.html(await renderSite(c, site, flash))
 })
 
 app.post('/sites/:id/webhook', async c => {
@@ -652,6 +667,51 @@ app.post('/sites/:id/secret', async c => {
   // Rendered rather than redirected: a redirect would have to carry the secret
   // in a URL, which lands in history, logs and referrers.
   return c.html(await renderSite(c, { ...site, webhook_secret: secret }, { revealedSecret: secret }))
+})
+
+/**
+ * Deletion is owner-driven, never agent-driven: an owner removing their own data.
+ * Both routes are already behind requireAuth and the same-origin POST check, and
+ * both scope by owner in the SQL rather than trusting the id in the URL.
+ */
+app.post('/reports/:id/delete', async c => {
+  const report = await c.env.DB.prepare(
+    `SELECT reports.id AS id, reports.site_id AS site_id FROM reports
+     JOIN sites ON sites.id = reports.site_id
+     WHERE reports.id = ? AND sites.owner_id = ?`,
+  ).bind(c.req.param('id'), c.get('ownerId')).first<{ id: string; site_id: string }>()
+  if (!report) return c.html(errorPage(404, 'No such report.'), 404)
+
+  await c.env.DB.prepare('DELETE FROM reports WHERE id = ?').bind(report.id).run()
+  return c.redirect(`/sites/${report.site_id}?deleted=report`, 302)
+})
+
+app.get('/sites/:id/delete', async c => {
+  const site = await loadSite(c, c.req.param('id'), c.get('ownerId'))
+  if (!site) return c.html(errorPage(404, 'No such site.'), 404)
+  const count = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM reports WHERE site_id = ?')
+    .bind(site.id).first<{ n: number }>()
+  return c.html(confirmDeleteSitePage(site, count?.n ?? 0, c.get('ownerLabel')))
+})
+
+app.post('/sites/:id/delete', async c => {
+  const site = await loadSite(c, c.req.param('id'), c.get('ownerId'))
+  if (!site) return c.html(errorPage(404, 'No such site.'), 404)
+
+  const form = await c.req.formData()
+  // Typing the name is the confirm step: a misclick cannot destroy a site's
+  // entire history, and the owner has to have read which site they are on.
+  if (String(form.get('confirm') ?? '').trim() !== site.name) {
+    return c.html(confirmDeleteSitePage(site, 0, c.get('ownerLabel'),
+      'That did not match the site name, so nothing was deleted.'), 400)
+  }
+
+  // Reports first: if the second statement fails the site still exists, which is
+  // a recoverable state. The reverse would orphan rows.
+  await c.env.DB.prepare('DELETE FROM reports WHERE site_id = ?').bind(site.id).run()
+  await c.env.DB.prepare('DELETE FROM sites WHERE id = ? AND owner_id = ?')
+    .bind(site.id, c.get('ownerId')).run()
+  return c.redirect('/sites?deleted=site', 302)
 })
 
 app.post('/reports/:id/status', async c => {

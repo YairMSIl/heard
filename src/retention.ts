@@ -1,13 +1,21 @@
 import type { Env } from './types'
 
 export const DONE_RETENTION_DAYS = 180
+/** Outer bound for reports nobody ever triaged, so "new" is not "forever". */
+export const OPEN_RETENTION_DAYS = 365
+/** After this, a reporter's email is dropped regardless of the report's status. */
+export const EMAIL_RETENTION_DAYS = 90
 export const DEMO_RETENTION_HOURS = 24
 export const DEMO_SITE_ID = 'site_demo'
 
 export interface PruneResult {
   doneDeleted: number
+  openDeleted: number
+  emailsCleared: number
   demoDeleted: number
   doneCutoff: number
+  openCutoff: number
+  emailCutoff: number
   demoCutoff: number
 }
 
@@ -45,11 +53,26 @@ export function describePruneFreshness(value: string | null | undefined, now: nu
  */
 export async function pruneReports(env: Env, now: number = Date.now()): Promise<PruneResult> {
   const doneCutoff = now - DONE_RETENTION_DAYS * 24 * 60 * 60 * 1000
+  const openCutoff = now - OPEN_RETENTION_DAYS * 24 * 60 * 60 * 1000
+  const emailCutoff = now - EMAIL_RETENTION_DAYS * 24 * 60 * 60 * 1000
   const demoCutoff = now - DEMO_RETENTION_HOURS * 60 * 60 * 1000
 
   const done = await env.DB
     .prepare("DELETE FROM reports WHERE status = 'done' AND created_at < ?")
     .bind(doneCutoff).run()
+
+  // Reports nobody triaged still go eventually: "we keep it until you deal with
+  // it" is not a retention policy anyone can promise a visitor.
+  const open = await env.DB
+    .prepare("DELETE FROM reports WHERE status != 'done' AND created_at < ?")
+    .bind(openCutoff).run()
+
+  // The email is the only directly identifying field a visitor gives us, and it
+  // stops being useful long before the report does. Cleared on its own clock,
+  // regardless of status, so an untriaged report does not keep an address alive.
+  const emails = await env.DB
+    .prepare('UPDATE reports SET email = NULL WHERE email IS NOT NULL AND created_at < ?')
+    .bind(emailCutoff).run()
 
   const demo = await env.DB
     .prepare('DELETE FROM reports WHERE site_id = ? AND created_at < ?')
@@ -57,8 +80,12 @@ export async function pruneReports(env: Env, now: number = Date.now()): Promise<
 
   const result: PruneResult = {
     doneDeleted: done.meta?.changes ?? 0,
+    openDeleted: open.meta?.changes ?? 0,
+    emailsCleared: emails.meta?.changes ?? 0,
     demoDeleted: demo.meta?.changes ?? 0,
     doneCutoff,
+    openCutoff,
+    emailCutoff,
     demoCutoff,
   }
 
@@ -74,7 +101,12 @@ export async function pruneReports(env: Env, now: number = Date.now()): Promise<
     'INSERT INTO meta (key, value, updated_at) VALUES (?, ?, ?) ' +
     'ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
   ).bind(LAST_PRUNE_COUNTS_KEY,
-    JSON.stringify({ doneDeleted: result.doneDeleted, demoDeleted: result.demoDeleted }), now).run()
+    JSON.stringify({
+      doneDeleted: result.doneDeleted,
+      openDeleted: result.openDeleted,
+      emailsCleared: result.emailsCleared,
+      demoDeleted: result.demoDeleted,
+    }), now).run()
 
   return result
 }
