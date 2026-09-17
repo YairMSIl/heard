@@ -1,5 +1,6 @@
 export interface Env {
   DB: D1Database
+  RATE_LIMITER: DurableObjectNamespace
   /** Break-glass shared token; the normal way in is GitHub OAuth. */
   ADMIN_TOKEN?: string
   GITHUB_OAUTH_CLIENT_ID?: string
@@ -30,6 +31,8 @@ export interface SiteRow {
   public_key: string
   webhook_url: string | null
   webhook_secret: string | null
+  hourly_cap: number | null
+  daily_cap: number | null
   created_at: number
 }
 

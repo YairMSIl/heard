@@ -6,8 +6,10 @@ import type { Env, OwnerRow, ReportRow, ReportStatus, SiteRow } from './types'
 import { REPORT_STATUSES } from './types'
 import { newPublicKey, newReportId, newSiteId, newWebhookSecret, randomId } from './ids'
 import { reportRateLimiter } from './ratelimit'
+import { consumeIp, consumeSite, peekSite } from './ratelimit-client'
+import { resolveCaps } from './limits'
 import { truncateUserAgent, validateReportInput, validateWebhookUrl } from './validation'
-import { buildWebhookPayload, deliverWebhook } from './webhook'
+import { buildRateLimitedPayload, buildWebhookPayload, deliverWebhook } from './webhook'
 import { describePruneFreshness, LAST_PRUNE_KEY, pruneReports } from './retention'
 import {
   createSession,
@@ -93,14 +95,21 @@ app.get('/widget.js', c =>
 // The report endpoint is called from arbitrary origins by design.
 app.use('/api/report', cors({ origin: '*', allowMethods: ['POST', 'OPTIONS'], allowHeaders: ['content-type'], maxAge: 86400 }))
 
+const tooMany = (c: Context, retryAfterSeconds: number, message = 'Too many reports, please slow down.') =>
+  c.json({ error: message }, 429, { 'retry-after': String(Math.max(1, retryAfterSeconds)) })
+
 app.post('/api/report', async c => {
   const ip = c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for') ?? 'unknown'
-  const limit = reportRateLimiter.check(ip)
-  if (!limit.allowed) {
-    return c.json({ error: 'Too many reports, please slow down.' }, 429, {
-      'retry-after': String(limit.retryAfterSeconds),
-    })
-  }
+
+  // First line: per-isolate and free. It cannot enforce a global limit, but it
+  // absorbs an obvious burst without paying for a Durable Object round trip.
+  const local = reportRateLimiter.check(ip)
+  if (!local.allowed) return tooMany(c, local.retryAfterSeconds)
+
+  // Second line: the real per-IP limit, global because one Durable Object
+  // instance owns the counter for a given address.
+  const ipLimit = await consumeIp(c.env, ip)
+  if (!ipLimit.allowed) return tooMany(c, ipLimit.retryAfterSeconds)
 
   let body: unknown
   try {
@@ -117,6 +126,25 @@ app.post('/api/report', async c => {
   const site = await c.env.DB.prepare('SELECT * FROM sites WHERE public_key = ?')
     .bind(key).first<SiteRow>()
   if (!site) return c.json({ error: 'unknown site key' }, 404)
+
+  // Per-site caps come after the site is known, and before validation: a cap is
+  // about how much of our capacity one site may consume, and a malformed body
+  // consumes it just the same.
+  const siteLimit = await consumeSite(c.env, site.id, site)
+  if (!siteLimit.allowed) {
+    const blocked = siteLimit.usage.find(u => u.name === siteLimit.blockedWindow)
+    if (siteLimit.notify && site.webhook_url && blocked) {
+      c.executionCtx.waitUntil(deliverWebhook(
+        site.webhook_url,
+        buildRateLimitedPayload(site, {
+          window: blocked.name, limit: blocked.limit, count: blocked.count, resetAt: blocked.resetAt,
+        }),
+        site.webhook_secret,
+      ))
+    }
+    return tooMany(c, siteLimit.retryAfterSeconds,
+      'This site is not accepting more feedback right now. Please try again later.')
+  }
 
   const parsed = validateReportInput(body)
   if (!parsed.ok) return c.json({ error: parsed.error }, 400)
@@ -444,6 +472,8 @@ app.get('/sites/:id', async c => {
   return c.html(sitePage(site, await loadReports(c, site.id), new URL(c.req.url).origin, {
     who: c.get('ownerLabel'),
     widgetKey: await selfWidgetKey(c.env),
+    usage: (await peekSite(c.env, site.id, site)).usage,
+    caps: resolveCaps(site),
     flash: c.req.query('saved') ? { ok: 'Saved.' } : undefined,
   }))
 })
@@ -504,6 +534,8 @@ app.onError((err, c) => {
   console.error('unhandled', err)
   return c.html(errorPage(500, 'Something broke on our side.'), 500)
 })
+
+export { RateLimiterDO } from './rate-limiter-do'
 
 export default {
   fetch: app.fetch,

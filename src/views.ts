@@ -1,4 +1,5 @@
 import type { ReportRow, SiteRow } from './types'
+import type { WindowUsage } from './limits'
 
 /** Every interpolation into HTML goes through this. No exceptions. */
 export function esc(value: unknown): string {
@@ -51,6 +52,10 @@ const STYLES = `
   .or{color:var(--muted);font-size:13px;margin:22px 0 10px;text-align:center}
   .secret{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;word-break:break-all;background:#0b1020;color:#e5e7eb;padding:10px;border-radius:8px}
   details summary{cursor:pointer;color:var(--muted);font-size:13px}
+  .usage{margin-bottom:12px}
+  .usage:last-of-type{margin-bottom:6px}
+  .bar{height:6px;border-radius:3px;background:#e5e7eb;overflow:hidden;margin-top:6px}
+  .bar span{display:block;height:100%;background:var(--ink)}
   .hero{padding:64px 0 8px}
   .hero h1{font-size:40px;line-height:1.1;letter-spacing:-.02em;margin:0 0 14px}
   .lede{font-size:17px;color:#374151;max-width:38em;margin:0 0 28px}
@@ -164,6 +169,9 @@ function reportCard(report: ReportRow): string {
 }
 
 export interface SitePageOptions {
+  /** Current rate-limit consumption, read without incrementing. */
+  usage?: WindowUsage[]
+  caps?: { hourly: number; daily: number }
   /** Present only on the one response that created it; never re-readable. */
   revealedSecret?: string | null
   who?: string | null
@@ -177,7 +185,7 @@ export function sitePage(
   origin: string,
   opts: SitePageOptions = {},
 ): string {
-  const { revealedSecret, who, widgetKey, flash } = opts
+  const { revealedSecret, who, widgetKey, usage, caps, flash } = opts
   const snippet = `<script src="${origin}/widget.js?key=${site.public_key}" defer><\/script>`
   const list = reports.length
     ? reports.map(reportCard).join('')
@@ -221,8 +229,37 @@ export function sitePage(
       </form>
     </div>
 
+    <h2>Submission limits</h2>
+    ${usageBlock(usage, caps)}
+
     <h2>Reports (${reports.length})</h2>
     ${list}`, { who, widgetKey })
+}
+
+/**
+ * Shows what the site has spent against its caps. Rendered from a read-only
+ * peek at the limiter, so opening the dashboard never consumes a visitor's
+ * budget.
+ */
+function usageBlock(usage: WindowUsage[] | undefined, caps?: { hourly: number; daily: number }): string {
+  if (!usage?.length) {
+    return `<div class="card"><p class="meta">Limits are
+      ${caps ? `${esc(caps.hourly)}/hour and ${esc(caps.daily)}/day` : 'at their defaults'},
+      but current usage is unavailable right now.</p></div>`
+  }
+  const rows = usage.map(u => {
+    const pct = u.limit > 0 ? Math.min(100, Math.round((u.count / u.limit) * 100)) : 0
+    const resets = new Date(u.resetAt).toISOString().replace('T', ' ').slice(0, 16)
+    return `<div class="usage">
+      <div class="between"><span><strong>${esc(u.count)}</strong> of ${esc(u.limit)} this ${esc(u.name)}</span>
+      <span class="meta">resets ${esc(resets)} UTC</span></div>
+      <div class="bar"><span style="width:${pct}%"></span></div>
+    </div>`
+  }).join('')
+  return `<div class="card">${rows}
+    <p class="meta">Reports beyond a cap are refused with a 429 while the window is full.
+      Visitors see a short "try again later" message; nothing is lost silently on our side.</p>
+  </div>`
 }
 
 export const REPO_URL = 'https://github.com/YairMSIl/heard'

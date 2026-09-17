@@ -2,6 +2,13 @@ import type { ReportRow } from './types'
 
 const TIMEOUT_MS = 5000
 
+export interface RateLimitedPayload {
+  event: 'report.rate_limited'
+  site: { id: string; name: string }
+  limit: { window: string; limit: number; count: number; resetAt: string }
+  message: string
+}
+
 export interface WebhookPayload {
   event: 'report.created'
   site: { id: string; name: string }
@@ -36,6 +43,23 @@ export function buildWebhookPayload(siteName: string, report: ReportRow): Webhoo
   }
 }
 
+/**
+ * Sent at most once per day, on the first submission a site's cap refuses.
+ * Owners need to know reports are being dropped; they do not need one delivery
+ * per dropped report, which would turn a rate limit into its own flood.
+ */
+export function buildRateLimitedPayload(
+  site: { id: string; name: string },
+  limit: { window: string; limit: number; count: number; resetAt: number },
+): RateLimitedPayload {
+  return {
+    event: 'report.rate_limited',
+    site: { id: site.id, name: site.name },
+    limit: { ...limit, resetAt: new Date(limit.resetAt).toISOString() },
+    message: `Heard is refusing new reports for "${site.name}": the ${limit.window} cap of ${limit.limit} was reached. Submissions resume after the window resets. You will not get another notice today.`,
+  }
+}
+
 function toHex(buffer: ArrayBuffer): string {
   return [...new Uint8Array(buffer)].map(b => b.toString(16).padStart(2, '0')).join('')
 }
@@ -66,7 +90,7 @@ export async function signBody(secret: string, body: string): Promise<string> {
  */
 export async function deliverWebhook(
   url: string,
-  payload: WebhookPayload,
+  payload: WebhookPayload | RateLimitedPayload,
   secret?: string | null,
 ): Promise<void> {
   const body = JSON.stringify(payload)

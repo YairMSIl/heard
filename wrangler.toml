@@ -22,6 +22,16 @@ database_name = "heard"
 # ignores this id entirely.
 database_id = "cde604b3-118a-4296-a9af-e9ff6898d898"
 
+# Rate limiting lives in a Durable Object so counters are global rather than
+# per-isolate. SQLite-backed classes are the free-plan path for Durable Objects.
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiterDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RateLimiterDO"]
+
 [triggers]
 # Daily retention sweep (03:17 UTC, off the top of the hour to avoid the
 # stampede every other cron on the platform joins).

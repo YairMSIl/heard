@@ -4,7 +4,7 @@ import type { ReportRow, SiteRow } from '../src/types'
 
 const site: SiteRow = {
   id: 'site_1', owner_id: 'own_local', name: 'Example', public_key: 'pk_abc',
-  webhook_url: null, webhook_secret: null, created_at: 0,
+  webhook_url: null, webhook_secret: null, hourly_cap: null, daily_cap: null, created_at: 0,
 }
 
 describe('esc', () => {
@@ -52,6 +52,26 @@ describe('sitePage', () => {
   it('offers to generate a secret when the site has none', () => {
     expect(sitePage(site, [], 'https://h.test')).toContain('Generate secret')
     expect(sitePage({ ...site, webhook_secret: 'whsec_x' }, [], 'https://h.test')).toContain('Regenerate secret')
+  })
+
+  it('shows usage against the caps when the limiter answered', () => {
+    const html = sitePage(site, [], 'https://h.test', {
+      usage: [
+        { name: 'hour', count: 4, limit: 30, resetAt: Date.parse('2026-09-17T20:00:00Z') },
+        { name: 'day', count: 12, limit: 200, resetAt: Date.parse('2026-09-18T00:00:00Z') },
+      ],
+      caps: { hourly: 30, daily: 200 },
+    })
+    expect(html).toContain('of 30 this hour')
+    expect(html).toContain('of 200 this day')
+    expect(html).toContain('2026-09-17 20:00 UTC')
+  })
+
+  it('says so plainly when usage could not be read, rather than showing zero', () => {
+    // Zero would read as "no traffic", which is a different and wrong claim.
+    const html = sitePage(site, [], 'https://h.test', { caps: { hourly: 30, daily: 200 } })
+    expect(html).toMatch(/usage is unavailable/i)
+    expect(html).toContain('30/hour and 200/day')
   })
 
   it('shows who is signed in and a sign-out control', () => {
