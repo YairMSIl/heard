@@ -99,7 +99,7 @@ export function truncateUserAgent(value: string | null | undefined): string | nu
  * trivial cases; the delivery cap and auto-disable below remove the value of
  * the rest.
  */
-function isPrivateHost(hostname: string): boolean {
+export function isPrivateHostname(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, '')
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return true
   if (host === '::1' || host === '0.0.0.0') return true
@@ -197,7 +197,7 @@ export function validateWebhookUrl(value: string | null | undefined, selfOrigin?
     return { ok: false, error: 'webhook url must be http or https' }
   }
   if (raw.length > MAX_URL_LENGTH) return { ok: false, error: 'webhook url is too long' }
-  if (isPrivateHost(url.hostname)) {
+  if (isPrivateHostname(url.hostname)) {
     return { ok: false, error: 'webhook url must point at a public address, not a private or loopback one' }
   }
   // Pointing Heard at itself is a loop or a probe, never a real configuration.

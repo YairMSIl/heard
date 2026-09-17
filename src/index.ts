@@ -26,7 +26,7 @@ import {
   validateWebhookUrl,
 } from './validation'
 import { buildRateLimitedPayload, buildWebhookPayload, verifyWebhookTarget } from './webhook'
-import { deliverAndRecord } from './webhook-delivery'
+import { deliverAndRecord, recheckWebhooks } from './webhook-delivery'
 import { describePruneFreshness, LAST_PRUNE_KEY, pruneReports } from './retention'
 import {
   createSession,
@@ -54,6 +54,7 @@ import {
   sitePage,
   sitesPage,
 } from './views'
+import { resolvesToPublicAddress } from './dns'
 import { securityHeaders } from './security-headers'
 import { WIDGET_JS } from './widget'
 
@@ -611,6 +612,11 @@ app.post('/sites/:id/webhook', async c => {
     return c.redirect(`/sites/${site.id}?saved=1`, 302)
   }
 
+  // Resolve before challenging: a name like 127.0.0.1.nip.io passes the textual
+  // guard and would otherwise be challenged and stored.
+  const resolved = await resolvesToPublicAddress(new URL(parsed.value).hostname)
+  if (!resolved.ok) return c.html(await renderSite(c, site, { error: resolved.error }), 400)
+
   // Consent from the destination, not from whoever typed the URL: the endpoint
   // must echo a value it could only have learned by receiving our request.
   const challenge = randomId(24)
@@ -750,6 +756,11 @@ export default {
     ctx.waitUntil(
       pruneReports(env).then(result => {
         console.log('retention', JSON.stringify(result))
+      }),
+    )
+    ctx.waitUntil(
+      recheckWebhooks(env).then(result => {
+        console.log('webhook recheck', JSON.stringify(result))
       }),
     )
   },
