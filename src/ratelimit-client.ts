@@ -3,6 +3,7 @@ import {
   deploymentWindows,
   hashSource,
   ipWindows,
+  sourceBucket,
   siteWindows,
   sourceShareWindows,
   type SiteCaps,
@@ -39,6 +40,15 @@ const ALLOW_ON_ERROR: LimitDecision = {
  */
 let degradedCount = 0
 export const rateLimitDegradedCount = () => degradedCount
+
+/**
+ * The webhook delivery cap fails open through its own catch. It is counted
+ * separately rather than folded in, because "requests are unlimited right now"
+ * and "outbound deliveries are unlimited right now" are different incidents.
+ */
+let webhookDegradedCount = 0
+export const webhookDeliveryDegradedCount = () => webhookDegradedCount
+export const recordWebhookDeliveryDegraded = () => { webhookDegradedCount += 1 }
 
 async function call(
   env: Env,
@@ -79,11 +89,19 @@ export const consumeIp = (env: Env, ip: string) =>
  * would be silent until tomorrow.
  */
 export const consumeSite = (env: Env, siteId: string, caps: SiteCaps, hasWebhook: boolean, ip: string) =>
-  call(env, `site:${siteId}`, siteWindows(caps), 'consume', hasWebhook, hashSource(ip))
+  call(env, `site:${siteId}`, siteWindows(caps), 'consume', hasWebhook, hashSource(sourceBucket(ip)))
 
-/** One source's share of a site, so a single address cannot starve the rest. */
-export const consumeSiteSource = (env: Env, siteId: string, caps: SiteCaps, ip: string) =>
-  call(env, `site:${siteId}|ip:${hashSource(ip)}`, sourceShareWindows(caps), 'consume')
+/**
+ * One source network's share of a site, so a single connection cannot starve the
+ * rest. Returns "allowed" unchanged when the site's cap is too small for a share
+ * to make sense — `sourceShareWindows` gives an empty list and an empty window
+ * set always passes.
+ */
+export const consumeSiteSource = (env: Env, siteId: string, caps: SiteCaps, ip: string) => {
+  const windows = sourceShareWindows(caps)
+  if (windows.length === 0) return Promise.resolve({ ...ALLOW_ON_ERROR, degraded: false })
+  return call(env, `site:${siteId}|net:${hashSource(sourceBucket(ip))}`, windows, 'consume')
+}
 
 export const consumeDeployment = (env: Env) =>
   call(env, 'deployment:all', deploymentWindows(), 'consume')

@@ -1,6 +1,7 @@
 import type { Env, SiteRow } from './types'
 import { HOUR_MS } from './limits'
 import { MAX_CONSECUTIVE_FAILURES, WEBHOOK_DELIVERIES_PER_HOUR, deliverWebhook } from './webhook'
+import { recordWebhookDeliveryDegraded } from './ratelimit-client'
 import type { RateLimitedPayload, WebhookPayload } from './webhook'
 
 /**
@@ -33,7 +34,9 @@ export async function deliverAndRecord(
       return
     }
   } catch (err) {
-    // Fail open on the cap, consistent with the request limiter.
+    // Fail open on the cap, consistent with the request limiter — and counted,
+    // so /health can show that outbound deliveries are currently uncapped.
+    recordWebhookDeliveryDegraded()
     console.error('webhook delivery cap check failed', site.id, err instanceof Error ? err.message : err)
   }
 

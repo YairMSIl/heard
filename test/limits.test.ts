@@ -13,6 +13,7 @@ import {
   deploymentWindows,
   evaluateWindows,
   hashSource,
+  sourceBucket,
   sourceShareWindows,
   ipWindows,
   resolveCaps,
@@ -164,10 +165,14 @@ describe('deployment ceiling', () => {
 })
 
 describe('per-source share of a site (R1.1)', () => {
-  it('gives one source a fifth of each window, never zero', () => {
+  it('gives one source a fifth of each qualifying window', () => {
     expect(sourceShareWindows({ hourly_cap: 30, daily_cap: 200 }).map(w => w.limit)).toEqual([6, 40])
-    // A tiny cap must still leave one submission possible.
-    expect(sourceShareWindows({ hourly_cap: 1, daily_cap: 2 }).map(w => w.limit)).toEqual([1, 1])
+  })
+
+  it('no longer floors a tiny cap at 1 (S14 reversed this)', () => {
+    // The old behaviour raised floor(1 * 0.2) = 0 up to 1, which meant a single
+    // report per hour for an entire shared connection. Now no share applies.
+    expect(sourceShareWindows({ hourly_cap: 1, daily_cap: 2 })).toEqual([])
   })
 
   it('keeps the site-wide number as the real ceiling', () => {
@@ -199,5 +204,55 @@ describe('clampSpecs (R5)', () => {
   })
   it('never clamps below 1', () => {
     expect(clampSpecs([{ name: 'hour', ms: HOUR_MS, limit: 0 }])[0].limit).toBe(1)
+  })
+})
+
+describe('sourceBucket (S14)', () => {
+  it('collapses an IPv4 address to its /24, so a NAT is one bucket', () => {
+    expect(sourceBucket('203.0.113.7')).toBe('203.0.113.0/24')
+    expect(sourceBucket('203.0.113.250')).toBe('203.0.113.0/24')
+    expect(sourceBucket('203.0.113.7')).toBe(sourceBucket('203.0.113.99'))
+  })
+
+  it('keeps different /24s apart', () => {
+    expect(sourceBucket('203.0.113.7')).not.toBe(sourceBucket('203.0.114.7'))
+  })
+
+  it('collapses an IPv6 address to its /64', () => {
+    expect(sourceBucket('2001:db8:1:2:3:4:5:6')).toBe('2001:db8:1:2::/64')
+    expect(sourceBucket('2001:db8:1:2:ffff:ffff:ffff:ffff')).toBe('2001:db8:1:2::/64')
+  })
+
+  it('expands a compressed IPv6 run correctly', () => {
+    expect(sourceBucket('2001:db8::1')).toBe('2001:db8:0:0::/64')
+    expect(sourceBucket('fd00::abcd')).toBe('fd00:0:0:0::/64')
+  })
+
+  it('separates different /64s that share a prefix', () => {
+    expect(sourceBucket('2001:db8:1:2::1')).not.toBe(sourceBucket('2001:db8:1:3::1'))
+  })
+
+  it('passes through anything it does not recognise', () => {
+    expect(sourceBucket('unknown')).toBe('unknown')
+  })
+})
+
+describe('the share is not applied to small caps (S14)', () => {
+  it('produces no windows below the minimum cap', () => {
+    // floor(3 * 0.2) = 0, and a floor of 1 would stop two colleagues behind one
+    // NAT both filing. No share at all is the honest answer.
+    expect(sourceShareWindows({ hourly_cap: 3, daily_cap: 5 })).toEqual([])
+    expect(sourceShareWindows({ hourly_cap: 9, daily_cap: 9 })).toEqual([])
+  })
+
+  it('applies per window independently at the boundary', () => {
+    // hour 10 qualifies, day 9 does not.
+    const w = sourceShareWindows({ hourly_cap: 10, daily_cap: 9 })
+    expect(w.map(x => x.name)).toEqual(['hour'])
+    expect(w[0].limit).toBe(2)
+  })
+
+  it('still applies at the defaults', () => {
+    expect(sourceShareWindows({ hourly_cap: null, daily_cap: null }).map(w => w.limit)).toEqual([6, 40])
   })
 })

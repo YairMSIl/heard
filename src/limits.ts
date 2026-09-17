@@ -19,6 +19,14 @@ export const SITES_PER_OWNER = 5
  * starving the site's real visitors.
  */
 export const SOURCE_SHARE = 0.2
+/**
+ * Below this cap the share is not applied at all. At 30/hour a fifth is 6, which
+ * is a usable allowance; at 3/hour `floor(3 * 0.2)` is 0 and the floor of 1 would
+ * mean two people behind one office NAT cannot both file a report. A small cap is
+ * already the owner saying "I expect very little traffic", so the site-wide number
+ * is protection enough.
+ */
+export const SOURCE_SHARE_MIN_CAP = 10
 /** Distinct sources tracked per window, so the DO's storage cannot grow without bound. */
 export const MAX_TRACKED_SOURCES = 500
 export const DEFAULT_HOURLY_CAP = 30
@@ -79,9 +87,41 @@ export function siteWindows(site: SiteCaps | null | undefined): WindowSpec[] {
   ]
 }
 
-/** A site's windows scaled to one source's share, never below 1. */
+/**
+ * A site's windows scaled to one source's share, or an empty list when the site's
+ * cap is too small for a share to be meaningful — see SOURCE_SHARE_MIN_CAP.
+ */
 export function sourceShareWindows(site: SiteCaps | null | undefined): WindowSpec[] {
-  return siteWindows(site).map(w => ({ ...w, limit: Math.max(1, Math.floor(w.limit * SOURCE_SHARE)) }))
+  return siteWindows(site)
+    .filter(w => w.limit >= SOURCE_SHARE_MIN_CAP)
+    .map(w => ({ ...w, limit: Math.max(1, Math.floor(w.limit * SOURCE_SHARE)) }))
+}
+
+/**
+ * Coarsens an address to the unit a shared connection actually occupies: an IPv4
+ * /24 or an IPv6 /64. A whole office, campus or carrier NAT is then one bucket
+ * rather than one visitor, so the share throttles a network instead of punishing
+ * the seventh colleague to report the same outage.
+ *
+ * The cost is that an abuser with a /24 is also one bucket — which is the right
+ * trade: the site-wide cap is the real ceiling, and this only decides how the
+ * ceiling is shared out.
+ */
+export function sourceBucket(ip: string): string {
+  const v4 = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.\d{1,3}$/)
+  if (v4) return `${v4[1]}.${v4[2]}.${v4[3]}.0/24`
+  if (ip.includes(':')) {
+    // First four hextets are the /64; expand a :: run only as far as needed.
+    const [head] = ip.split('%')
+    const parts = head.split('::')
+    const left = parts[0].split(':').filter(Boolean)
+    if (parts.length === 1) return left.slice(0, 4).join(':') + '::/64'
+    const right = (parts[1] ?? '').split(':').filter(Boolean)
+    const missing = Math.max(0, 8 - left.length - right.length)
+    const full = [...left, ...Array(missing).fill('0'), ...right]
+    return full.slice(0, 4).join(':') + '::/64'
+  }
+  return ip
 }
 
 /**

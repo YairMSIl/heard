@@ -13,6 +13,7 @@ import {
   consumeSiteSource,
   peekSite,
   rateLimitDegradedCount,
+  webhookDeliveryDegradedCount,
 } from './ratelimit-client'
 import { resolveCaps, SITES_PER_OWNER } from './limits'
 import {
@@ -103,6 +104,7 @@ app.get('/health', async c => {
     pruneAgeHours: freshness.pruneAgeHours,
     // R2 renamed this; the old key stays one release so nothing reading it breaks.
     rateLimiterDegraded: rateLimitDegradedCount(),
+    webhookDeliveryDegraded: webhookDeliveryDegradedCount(),
     // Boolean only: whether the two admin credentials are genuinely distinct.
     // Never the values, never a hint at their length.
     adminApiTokenSeparate: Boolean(c.env.ADMIN_API_TOKEN && c.env.ADMIN_API_TOKEN !== c.env.ADMIN_TOKEN),
@@ -178,7 +180,8 @@ app.post('/api/report', async c => {
   const sourceLimit = await consumeSiteSource(c.env, site.id, site, ip)
   if (!sourceLimit.allowed) {
     return tooMany(c, sourceLimit.retryAfterSeconds,
-      'You have sent a lot of feedback to this site recently. Please try again later.')
+      'Too many reports from your network recently — this limit is per source network, '
+      + 'not per site, so the site itself is still accepting feedback. Please try again later.')
   }
 
   const siteLimit = await consumeSite(c.env, site.id, site, Boolean(site.webhook_url), ip)
