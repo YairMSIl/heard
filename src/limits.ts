@@ -8,6 +8,11 @@
  */
 
 export const IP_PER_MINUTE = 10
+/** Ceiling for the whole deployment, so no combination of sites can reach the D1 quota. */
+export const DEPLOYMENT_DAILY_CAP = 5000
+export const DEPLOYMENT_HOURLY_CAP = 1000
+/** Sign-in is open to any GitHub account, so site creation needs its own ceiling. */
+export const SITES_PER_OWNER = 5
 export const DEFAULT_HOURLY_CAP = 30
 export const DEFAULT_DAILY_CAP = 200
 
@@ -68,6 +73,18 @@ export function siteWindows(site: SiteCaps | null | undefined): WindowSpec[] {
 
 export function ipWindows(): WindowSpec[] {
   return [{ name: 'minute', ms: MINUTE_MS, limit: IP_PER_MINUTE }]
+}
+
+/**
+ * The last line: a single counter for every report the deployment accepts. Per-site
+ * caps bound one abuser; without this, minting sites multiplies the allowance and
+ * the free tier is still reachable.
+ */
+export function deploymentWindows(): WindowSpec[] {
+  return [
+    { name: 'hour', ms: HOUR_MS, limit: DEPLOYMENT_HOURLY_CAP },
+    { name: 'day', ms: DAY_MS, limit: DEPLOYMENT_DAILY_CAP },
+  ]
 }
 
 /**

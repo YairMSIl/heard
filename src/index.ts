@@ -6,8 +6,8 @@ import type { Env, OwnerRow, ReportRow, ReportStatus, SiteRow } from './types'
 import { REPORT_STATUSES } from './types'
 import { newPublicKey, newReportId, newSiteId, newWebhookSecret, randomId } from './ids'
 import { reportRateLimiter } from './ratelimit'
-import { consumeIp, consumeSite, peekSite } from './ratelimit-client'
-import { resolveCaps } from './limits'
+import { consumeDeployment, consumeIp, consumeSite, peekSite, rateLimitDegradedCount } from './ratelimit-client'
+import { resolveCaps, SITES_PER_OWNER } from './limits'
 import {
   allowedOriginList,
   isOriginAllowed,
@@ -87,6 +87,7 @@ app.get('/health', async c => {
     detail,
     lastPruneAt: freshness.lastPruneAt,
     pruneAgeHours: freshness.pruneAgeHours,
+    rateLimitDegraded: rateLimitDegradedCount(),
     time: new Date().toISOString(),
   }, db === 'ok' ? 200 : 503)
 })
@@ -140,6 +141,15 @@ app.post('/api/report', async c => {
   // trying to exhaust.
   if (!isOriginAllowed(c.req.header('origin'), site.allowed_origins)) {
     return c.json({ error: 'this site does not accept reports from that origin' }, 403)
+  }
+
+  // Deployment-wide ceiling, checked alongside the site cap: per-site limits
+  // bound one abuser, this bounds all of them together and is what actually
+  // protects the free tier.
+  const deploymentLimit = await consumeDeployment(c.env)
+  if (!deploymentLimit.allowed) {
+    return tooMany(c, deploymentLimit.retryAfterSeconds,
+      'Heard is at capacity right now. Please try again later.')
   }
 
   // Per-site caps come after the site is known, and before validation: a cap is
@@ -461,6 +471,16 @@ app.post('/sites/new', async c => {
   const name = String(form.get('name') ?? '').trim()
   if (!name) return c.html(newSitePage('Site name is required.', c.get('ownerLabel')), 400)
   if (name.length > 120) return c.html(newSitePage('Site name is too long.', c.get('ownerLabel')), 400)
+
+  // Any GitHub account can sign in, so without a ceiling an attacker mints
+  // sites and multiplies their per-site allowance.
+  const existing = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM sites WHERE owner_id = ?')
+    .bind(c.get('ownerId')).first<{ n: number }>()
+  if ((existing?.n ?? 0) >= SITES_PER_OWNER) {
+    return c.html(newSitePage(
+      `You have reached the limit of ${SITES_PER_OWNER} sites. Delete one, or ask us to raise it.`,
+      c.get('ownerLabel'), await selfWidgetKey(c.env)), 403)
+  }
 
   const id = newSiteId()
   await c.env.DB.prepare(

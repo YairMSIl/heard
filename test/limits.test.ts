@@ -6,6 +6,10 @@ import {
   HOUR_MS,
   IP_PER_MINUTE,
   MINUTE_MS,
+  DEPLOYMENT_DAILY_CAP,
+  DEPLOYMENT_HOURLY_CAP,
+  SITES_PER_OWNER,
+  deploymentWindows,
   evaluateWindows,
   ipWindows,
   resolveCaps,
@@ -133,5 +137,25 @@ describe('evaluateWindows', () => {
       if (r.allowed) stored = r.next
     }
     expect(accepted).toEqual([true, true, false, false])
+  })
+})
+
+describe('deployment ceiling', () => {
+  it('is far above any single site cap but still finite', () => {
+    const windows = deploymentWindows()
+    expect(windows.map(w => w.name)).toEqual(['hour', 'day'])
+    const day = windows.find(w => w.name === 'day')!
+    const hour = windows.find(w => w.name === 'hour')!
+    expect(day.limit).toBe(DEPLOYMENT_DAILY_CAP)
+    expect(hour.limit).toBe(DEPLOYMENT_HOURLY_CAP)
+    // It must exceed one site's default allowance, or a single honest site
+    // would trip the global ceiling on its own.
+    expect(day.limit).toBeGreaterThan(DEFAULT_DAILY_CAP)
+    expect(hour.limit).toBeGreaterThan(DEFAULT_HOURLY_CAP)
+  })
+
+  it('cannot be reached by the per-owner site allowance alone', () => {
+    // 5 sites x 200/day is the most one owner can legitimately generate.
+    expect(SITES_PER_OWNER * DEFAULT_DAILY_CAP).toBeLessThan(DEPLOYMENT_DAILY_CAP)
   })
 })

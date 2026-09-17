@@ -1,5 +1,5 @@
 import type { Env } from './types'
-import { ipWindows, siteWindows, type SiteCaps, type WindowSpec, type WindowUsage } from './limits'
+import { deploymentWindows, ipWindows, siteWindows, type SiteCaps, type WindowSpec, type WindowUsage } from './limits'
 import type { ConsumeResponse } from './rate-limiter-do'
 
 export interface LimitDecision {
@@ -20,6 +20,14 @@ const ALLOW_ON_ERROR: LimitDecision = {
   notify: false,
   degraded: true,
 }
+
+/**
+ * Fail-open decisions since this isolate started. Exposed on /health so an
+ * attacker cannot quietly overload the limiter into permissiveness: if this
+ * number moves, the limits are not being enforced and somebody should know.
+ */
+let degradedCount = 0
+export const rateLimitDegradedCount = () => degradedCount
 
 async function call(
   env: Env,
@@ -42,7 +50,9 @@ async function call(
     // Fail OPEN, loudly. A rate limiter that takes the site down when it breaks
     // is a worse outage than the abuse it prevents — but this must never be
     // silent, or we would serve unlimited traffic and believe we were protected.
-    console.error('rate limiter unavailable', key, err instanceof Error ? err.message : err)
+    degradedCount += 1
+    console.error('rate limiter unavailable', key, 'degraded_total=' + degradedCount,
+      err instanceof Error ? err.message : err)
     return ALLOW_ON_ERROR
   }
 }
@@ -52,6 +62,9 @@ export const consumeIp = (env: Env, ip: string) =>
 
 export const consumeSite = (env: Env, siteId: string, caps: SiteCaps) =>
   call(env, `site:${siteId}`, siteWindows(caps), 'consume', true)
+
+export const consumeDeployment = (env: Env) =>
+  call(env, 'deployment:all', deploymentWindows(), 'consume')
 
 /** Read-only, for the dashboard: never moves a counter. */
 export const peekSite = (env: Env, siteId: string, caps: SiteCaps) =>

@@ -169,3 +169,20 @@ describe('the limiter client fails open', () => {
     })
   })
 })
+
+describe('degraded counter', () => {
+  it('counts every fail-open decision so /health can show it', async () => {
+    const { consumeIp: ci, rateLimitDegradedCount } = await import('../src/ratelimit-client')
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const before = rateLimitDegradedCount()
+    const broken = {
+      RATE_LIMITER: { idFromName: () => ({}), get: () => ({ fetch: async () => { throw new Error('down') } }) },
+    } as unknown as Env
+    await ci(broken, '1.1.1.1')
+    await ci(broken, '2.2.2.2')
+    expect(rateLimitDegradedCount()).toBe(before + 2)
+    // The log carries the running total, so one tailed line tells you the scale.
+    expect(spy.mock.calls.some(c => String(c[2]).startsWith('degraded_total='))).toBe(true)
+    spy.mockRestore()
+  })
+})
