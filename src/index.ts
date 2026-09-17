@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import type { MiddlewareHandler } from 'hono'
+import type { Context, MiddlewareHandler } from 'hono'
 import { cors } from 'hono/cors'
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
 import type { Env, OwnerRow, ReportRow, ReportStatus, SiteRow } from './types'
@@ -17,7 +17,7 @@ import {
   timingSafeEqual,
   verifySession,
 } from './auth'
-import { errorPage, loginPage, newSitePage, sitePage, sitesPage } from './views'
+import { errorPage, landingPage, loginPage, newSitePage, sitePage, sitesPage } from './views'
 import { WIDGET_JS } from './widget'
 
 const ADMIN_COOKIE = 'heard_admin'
@@ -151,29 +151,45 @@ app.get('/demo', async c => {
  * demo site. Everything downstream reads only `ownerId`, so neither path is
  * privileged over the other once you are through here.
  */
-const requireAuth: MiddlewareHandler<{ Bindings: Env; Variables: Vars }> = async (c, next) => {
+interface ResolvedOwner {
+  id: string
+  label: string
+}
+
+/**
+ * Who is calling, or null. Split out from the middleware because `/` needs the
+ * answer without enforcing it: signed-in visitors go to their dashboard,
+ * everyone else gets the landing page.
+ */
+async function resolveOwner(c: Context<{ Bindings: Env; Variables: Vars }>): Promise<ResolvedOwner | null> {
   if (c.env.SESSION_SECRET) {
     const ownerId = await verifySession(c.env.SESSION_SECRET, getCookie(c, SESSION_COOKIE))
     if (ownerId) {
       const owner = await c.env.DB.prepare('SELECT * FROM owners WHERE id = ?')
         .bind(ownerId).first<OwnerRow>()
       // A valid signature for a deleted owner is not a session.
-      if (owner) {
-        c.set('ownerId', owner.id)
-        c.set('ownerLabel', owner.login ? `@${owner.login}` : 'signed in')
-        return await next()
-      }
+      if (owner) return { id: owner.id, label: owner.login ? `@${owner.login}` : 'signed in' }
     }
   }
 
   const adminCookie = getCookie(c, ADMIN_COOKIE)
   if (c.env.ADMIN_TOKEN && adminCookie && timingSafeEqual(adminCookie, c.env.ADMIN_TOKEN)) {
-    c.set('ownerId', LOCAL_OWNER_ID)
-    c.set('ownerLabel', 'operator')
-    return await next()
+    return { id: LOCAL_OWNER_ID, label: 'operator' }
   }
 
-  return c.redirect('/login', 302)
+  return null
+}
+
+const requireAuth: MiddlewareHandler<{ Bindings: Env; Variables: Vars }> = async (c, next) => {
+  // `/sites` matches both registrations below, so this can run twice per
+  // request. Resolving once avoids a second owner lookup in D1.
+  if (c.get('ownerId')) return await next()
+
+  const owner = await resolveOwner(c)
+  if (!owner) return c.redirect('/login', 302)
+  c.set('ownerId', owner.id)
+  c.set('ownerLabel', owner.label)
+  await next()
 }
 
 app.get('/login', c => {
@@ -285,7 +301,10 @@ app.use('/reports/*', requireAuth)
 
 /* --------------------------------------------------------------- dashboard */
 
-app.get('/', c => c.redirect('/sites', 302))
+app.get('/', async c => {
+  if (await resolveOwner(c)) return c.redirect('/sites', 302)
+  return c.html(landingPage(new URL(c.req.url).origin))
+})
 
 app.get('/sites', async c => {
   const { results } = await c.env.DB

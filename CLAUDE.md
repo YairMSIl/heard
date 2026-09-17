@@ -15,7 +15,9 @@ npm run dev                           # wrangler dev on http://localhost:8787
 `GET /__scheduled?cron=17+3+*+*+*` so retention can be run on demand.
 
 No Cloudflare account is needed for local work: `wrangler dev` runs a local
-SQLite-backed D1 under `.wrangler/state/` and ignores `database_id` in `wrangler.toml`.
+SQLite-backed D1 under `.wrangler/state/`. It never touches the remote database, but the
+local file **is keyed by `database_id`** — change that value and local dev silently gets
+a fresh empty database, so re-run the migration and you are back.
 
 Then:
 

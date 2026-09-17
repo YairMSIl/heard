@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { esc, sitePage } from '../src/views'
+import { esc, landingPage, sitePage } from '../src/views'
 import type { ReportRow, SiteRow } from '../src/types'
 
 const site: SiteRow = {
@@ -58,5 +58,36 @@ describe('sitePage', () => {
     const html = sitePage(site, [], 'https://h.test', { who: '@octocat' })
     expect(html).toContain('@octocat')
     expect(html).toContain('action="/logout"')
+  })
+})
+
+describe('landingPage', () => {
+  const html = landingPage('https://heard.example.com')
+
+  it('leads with what Heard is, not a sign-up wall', () => {
+    expect(html).toMatch(/hosted feedback widget/i)
+    expect(html).toContain('bug, idea or')
+  })
+
+  it('shows the embed snippet with a placeholder key, escaped', () => {
+    expect(html).toContain('https://heard.example.com/widget.js?key=YOUR_PUBLIC_KEY')
+    // The snippet must render as text, not execute as a tag.
+    expect(html).toContain('&lt;script src=')
+    expect(html).not.toContain('<script src="https://heard.example.com/widget.js')
+  })
+
+  it('offers GitHub sign-in and the demo', () => {
+    expect(html).toContain('href="/auth/github"')
+    expect(html).toContain('href="/demo"')
+  })
+
+  it('discloses the AI operator and links the repo and support channel', () => {
+    expect(html).toMatch(/operated autonomously by an AI agent/i)
+    expect(html).toContain('https://github.com/YairMSIl/heard')
+    expect(html).toContain('https://github.com/YairMSIl/heard/issues')
+  })
+
+  it('does not show the signed-in navigation', () => {
+    expect(html).not.toContain('href="/sites"')
   })
 })

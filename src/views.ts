@@ -51,6 +51,17 @@ const STYLES = `
   .or{color:var(--muted);font-size:13px;margin:22px 0 10px;text-align:center}
   .secret{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;word-break:break-all;background:#0b1020;color:#e5e7eb;padding:10px;border-radius:8px}
   details summary{cursor:pointer;color:var(--muted);font-size:13px}
+  .hero{padding:64px 0 8px}
+  .hero h1{font-size:40px;line-height:1.1;letter-spacing:-.02em;margin:0 0 14px}
+  .lede{font-size:17px;color:#374151;max-width:38em;margin:0 0 28px}
+  .cta{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+  .cta a.ghost-link{color:var(--ink);text-decoration:none;border:1px solid #d1d5db;background:#fff;padding:11px 18px;border-radius:8px;font-weight:600}
+  .cta a.ghost-link:hover{border-color:#9ca3af}
+  .colophon{border-top:1px solid var(--line);margin-top:44px;padding-top:18px;color:var(--muted);font-size:13.5px}
+  .colophon a{color:var(--muted)}
+  .steps{list-style:none;padding:0;margin:0;counter-reset:s}
+  .steps li{counter-increment:s;padding:0 0 14px 34px;position:relative;color:#374151}
+  .steps li::before{content:counter(s);position:absolute;left:0;top:0;width:22px;height:22px;border-radius:50%;background:var(--ink);color:#fff;font-size:12px;font-weight:700;display:grid;place-items:center}
   .ok{background:#d1fae5;color:#065f46;padding:10px 14px;border-radius:8px;margin-bottom:16px}
 `
 
@@ -205,6 +216,52 @@ export function sitePage(
 
     <h2>Reports (${reports.length})</h2>
     ${list}`, { who })
+}
+
+export const REPO_URL = 'https://github.com/YairMSIl/heard'
+export const ISSUES_URL = `${REPO_URL}/issues`
+
+/**
+ * What a signed-out visitor sees at `/`. Deliberately a single screen: the
+ * embed snippet is the product, so it appears above the fold rather than
+ * behind a sign-up.
+ */
+export function landingPage(origin: string): string {
+  const snippet = `<script src="${origin}/widget.js?key=YOUR_PUBLIC_KEY" defer><\/script>`
+  return layout('Feedback your visitors can actually send', `
+    <div class="hero">
+      <h1>Feedback your visitors<br>can actually send.</h1>
+      <p class="lede">
+        Heard is a hosted feedback widget. Paste one script tag and a small
+        &ldquo;Feedback&rdquo; button appears on your site: visitors pick bug, idea or
+        praise, write a message, and optionally leave an email. Heard captures the page
+        URL, browser and viewport for you, and the report lands in a dashboard where you
+        can work it from new to done &mdash; or forward it straight to your own endpoint
+        with a signed webhook.
+      </p>
+      <div class="cta">
+        <a class="gh" href="/auth/github">Sign in with GitHub</a>
+        <a class="ghost-link" href="/demo">See it on a live page</a>
+      </div>
+    </div>
+
+    <h2>How it works</h2>
+    <div class="card">
+      <ol class="steps">
+        <li>Sign in with GitHub and add your site &mdash; you get a public key.</li>
+        <li>Paste the snippet into your page, once, anywhere before <code>&lt;/body&gt;</code>.</li>
+        <li>Read and triage what comes in.</li>
+      </ol>
+      <pre>${esc(snippet)}</pre>
+      <p class="meta">The public key only identifies your site and grants no read access,
+        so it is safe in page source.</p>
+    </div>
+
+    <p class="colophon">
+      Heard is designed, built, deployed and operated autonomously by an AI agent &mdash;
+      the source is public at <a href="${REPO_URL}">github.com/YairMSIl/heard</a>.
+      Support: <a href="${ISSUES_URL}">GitHub Issues</a>.
+    </p>`, { nav: false })
 }
 
 export function errorPage(status: number, message: string): string {
