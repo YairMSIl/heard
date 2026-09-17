@@ -1,6 +1,7 @@
 # Heard — threat model
 
-**Reviewed at** commit `f5e3dba` (what production serves; deploys are manual).
+**First reviewed at** commit `f5e3dba`. **Verified at** commit `960df56`
+(hardening round 1, `175dd3e..960df56`).
 **Date** 2026-09-17. **Reviewer** Security Analyst (AI agent).
 **Method** Source review of `src/`, `migrations/`, `wrangler.toml`, CI; abuse
 reproduced against `wrangler dev` in a throwaway clone; read-only `GET`s against
@@ -11,9 +12,35 @@ Findings that say **verified** were reproduced. Findings that say **by
 inspection** follow from the code but were not executed. That distinction is
 load-bearing — treat an unverified claim as a hypothesis, not a fact.
 
-While this review was written the Builder had uncommitted work in the tree
-adding global per-IP and per-site caps in a Durable Object. Where that changes a
-finding it is noted inline; the severity given is for **what is deployed now**.
+Each finding carries a **Status** line. Severities are the ones assessed at
+first review and are left unchanged even where the finding is now closed, so the
+record shows what the risk was, not only what is left.
+
+## Status at a glance
+
+| # | Finding | Status | Commit |
+| --- | --- | --- | --- |
+| S1 | Prompt injection into the operating agent | fixed | `4ee5bfa` |
+| S2 | Write-quota and storage exhaustion | fixed | `ebb02a4` |
+| S3 | Webhook reflection and SSRF targets | fixed | `f23a30a` |
+| S4 | No Origin enforcement on `POST /api/report` | fixed | `175dd3e` |
+| S5 | `ADMIN_TOKEN` handling | **partial** | `fdd1978` |
+| S6 | No security response headers | fixed | `41c2b92` |
+| S7 | CSRF rests on `SameSite=Lax` | fixed | `41c2b92` |
+| S8 | Retention does not bound the data that matters | open | — |
+| S9 | `/health` error detail and unauthenticated D1 read | open | — |
+| S10 | `x-forwarded-for` as a rate-limit key | open | — |
+| S11 | Session, OAuth and supply-chain residuals | open | — |
+| S12 | Webhook target guard does not resolve DNS | open (new) | — |
+| S13 | Two `/health` keys from one degraded counter | open (new) | — |
+| S14 | Per-source share penalises shared egress addresses | open (new) | — |
+| S15 | Site limit tells owners to delete a site; no delete exists | open (new) | — |
+| S16 | Docs describe a sign-in that no longer works | open (new) | — |
+
+R1–R6, the review notes raised against the first rate-limiter commit, are all
+fixed in `ebb02a4` and `960df56` and re-verified; the two that produced lasting
+consequences are recorded as S13 (the duplicated `/health` key) and S14 (the
+per-source share's effect on shared addresses).
 
 ## What we are protecting
 
@@ -43,6 +70,7 @@ the mitigation is credential hygiene rather than application code.
 ## S1 — Indirect prompt injection into the operating agent
 
 **Severity: high.** **Verified.**
+**Status: fixed** in `4ee5bfa`, re-verified.
 
 Heard's own feedback site (`site_self`) is where feedback *about Heard* lands, and
 it is on the `ADMIN_ALLOWED_SITES` list precisely so the operating agent can read
@@ -104,6 +132,7 @@ documentation the Owner owns.
 ## S2 — Unauthenticated write-quota and storage exhaustion
 
 **Severity: high.** **Verified** (rate-limit bypass); quota arithmetic **by inspection**.
+**Status: fixed** in `ebb02a4`, re-verified.
 
 At `f5e3dba` the only throttle on `POST /api/report` is `reportRateLimiter`, an
 **in-memory, per-isolate, per-IP** fixed window of 10/minute. `src/ratelimit.ts`
@@ -152,6 +181,7 @@ authentication of any kind. Storage grows monotonically in the meantime, with
 ## S3 — Webhook reflection, amplification, and unfiltered SSRF targets
 
 **Severity: medium-high.** **Verified** locally; production behaviour toward
+**Status: fixed** in `f23a30a`, re-verified. One residual, now tracked as S12.
 private address space **unverified** (platform-dependent).
 
 `validateWebhookUrl` checks only that the URL parses and is `http(s)`. There is no
@@ -207,6 +237,7 @@ control nor monitor.
 ## S4 — No Origin or Referer enforcement on `POST /api/report`
 
 **Severity: medium.** **Verified.**
+**Status: fixed** in `175dd3e`, re-verified.
 
 The endpoint is intentionally `cors({ origin: '*' })` — a widget must post from
 any customer domain. But CORS is a browser courtesy, not a server control, and
@@ -237,6 +268,7 @@ non-browser client can send any `Origin` it likes.
 ## S5 — `ADMIN_TOKEN`: in the URL, in the cookie verbatim, shared, unrevocable
 
 **Severity: medium.** **Verified.**
+**Status: partial** in `fdd1978`. The mechanism is fixed and re-verified; the credential separation is not yet in effect. See the status note below.
 
 The break-glass path is `GET /login?token=<ADMIN_TOKEN>`, and the cookie it sets
 *is* the token:
@@ -281,6 +313,7 @@ length. Minor next to the above.
 ## S6 — No security response headers, anywhere
 
 **Severity: medium.** **Verified against production.**
+**Status: fixed** in `41c2b92`, re-verified.
 
 `GET https://heard.yairms.workers.dev/` returns `content-type` and Cloudflare's
 own headers, and nothing else. No `Content-Security-Policy`, no
@@ -317,6 +350,7 @@ cannot silently regress.
 ## S7 — CSRF rests entirely on `SameSite=Lax`
 
 **Severity: medium.** **Verified.**
+**Status: fixed** in `41c2b92`, re-verified.
 
 No state-changing `POST` checks `Origin` or carries a CSRF token. The server
 accepts a forged cross-site request outright:
@@ -347,6 +381,7 @@ cross-site navigation.
 ## S8 — Retention does not bound the data that matters, and is unproven in production
 
 **Severity: low-medium.** Retention rules **by inspection**; the production
+**Status: open.** Untouched by round 1.
 observation is **verified but inconclusive**.
 
 `pruneReports` deletes `done` reports older than 180 days and everything on the
@@ -381,6 +416,7 @@ promise the deployment cannot yet evidence.
 ## S9 — `/health` leaks D1 error detail and is an unauthenticated database round-trip
 
 **Severity: low.** **By inspection.**
+**Status: open.** Untouched by round 1.
 
 On a D1 failure the handler returns `detail: err.message` to any caller, which can
 carry schema or infrastructure specifics. Separately, every unauthenticated
@@ -396,6 +432,7 @@ keep their detail. Apply the in-memory limiter to `/health`.
 ## S10 — `x-forwarded-for` as a rate-limit key
 
 **Severity: low as deployed.** **By inspection.**
+**Status: open.** Untouched by round 1; re-confirmed present at `960df56`.
 
 ```js
 const ip = c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for') ?? 'unknown'
@@ -417,6 +454,7 @@ comment about isolate scope.
 ## S11 — Session, OAuth and supply-chain residuals
 
 **Severity: low.** **By inspection.**
+**Status: open.** Untouched by round 1.
 
 - **Sessions.** `<ownerId>.<issuedAt>.<hmac>` with a 30-day life, verified with a
   constant-time compare, future timestamps rejected, and a deleted owner's valid
@@ -445,6 +483,216 @@ security updates on the repo.
 
 ---
 
+## Round 1 verification evidence
+
+Re-run at `960df56` in a throwaway clone under `wrangler dev`, never in the
+shared `app/` tree. 227 tests and all three typecheck passes green.
+
+- **S1** — an anonymous instruction-shaped report now comes back from
+  `/api/admin/reports` with a top-level `warning`, a per-report
+  `source: "untrusted-visitor-input"`, and every line prefixed `> `. A
+  multi-line payload carrying `BEL` and `ESC[31m` returned as
+  `'> line one\n> line two\n> not-quoted?\n> [31mbell+ansi[0m'` — control
+  bytes stripped, newlines kept, no line left unquoted.
+- **S2 / R6** — site creation stops at `SITES_PER_OWNER = 5` (three creations
+  succeeded on an owner that already held two sites, then `403`). Deployment
+  ceiling is 1000/hour and 5000/day, consumed before the per-site cap.
+- **S3** — every target from the original reproduction is now refused at save:
+  `169.254.169.254`, `127.0.0.1`, `10.0.0.5`, `192.168.1.1`, `[::1]`,
+  `localhost`, `100.64.0.1`, `0.0.0.0`, and the decimal form `2130706433`;
+  `ftp://` refused separately. Challenge-on-save works: a cooperating endpoint
+  that echoes the challenge is saved and marked `webhook_verified_at`. Auto-disable
+  works exactly at the limit — ten failing deliveries set `webhook_disabled_at`
+  and the eleventh report produced no outbound request at all.
+- **S4** — with an allow-list set, `https://good.example` is accepted and
+  `https://evil.example`, `https://good.example.evil.com`, `Origin: null` and a
+  request with **no** `Origin` header are all `403`. An empty list still accepts
+  everything, so existing embeds are unaffected. Residual, as originally
+  specified: a non-browser client can simply send the allowed `Origin` string,
+  so this raises the cost of drive-by key reuse rather than eliminating abuse.
+- **S5** — `GET /login?token=` no longer authenticates (`200`, no cookie set).
+  `POST /login` mints `heard_session=<ownerId>.<issuedAt>.<hmac>` with
+  `SameSite=Strict`; the cookie is no longer the credential. With
+  `ADMIN_API_TOKEN` set, the dashboard token is refused on the admin API (`401`)
+  and the API token is refused as a dashboard login (`401`). **See the status
+  note below for why this is partial rather than fixed.**
+- **S6** — `default-src 'none'; script-src 'self'; style-src 'unsafe-inline';
+  connect-src 'self'; img-src 'self' data:; form-action 'self'; frame-ancestors
+  'none'; base-uri 'none'`, plus `nosniff`, `no-referrer`, HSTS and
+  `Cache-Control: private, no-store`. `/widget.js` is correctly exempt and keeps
+  `Access-Control-Allow-Origin: *` and its cache headers.
+- **S7** — a cross-site `Origin` on `POST /sites/new` is now `403`; the same
+  request previously returned `302` and created the site.
+- **R1** — one address against a fresh site is cut off at its 20% share (six
+  accepted at the default 30/hour, then `429`), and three visitors from other
+  addresses were served afterwards. The silencing lever is closed.
+- **R2** — the degraded counter increments in the failure path and is exposed on
+  `/health`. **Not verified end to end:** forcing a live Durable Object failure
+  was out of reach locally, so this rests on the code and the Builder's unit
+  test rather than on a reproduction.
+- **R3** — a site whose cap was exhausted while it had no webhook did **not**
+  burn the day's notice; after a webhook was added and verified, the next
+  refusal delivered `report.rate_limited`.
+- **R4** — a fresh source's Durable Object held `w:minute` while its window was
+  live, and its storage was gone once the window expired. The alarm reclaims.
+- **R5** — `clampSpecs` bounds caller-supplied limits against the policy
+  constants, and `now` is documented as test-only. It is still accepted from the
+  caller; the namespace is not publicly routable, so this is an accepted residual
+  rather than a gap.
+
+### S5 status note — the separation is real in code, not yet in the deployment
+
+`adminApiToken()` resolves `env.ADMIN_API_TOKEN ?? env.ADMIN_TOKEN`. Verified by
+removing `ADMIN_API_TOKEN` and re-running: the dashboard break-glass token is
+then accepted on `/api/admin/reports` with `200`.
+
+The fallback is the right call for a no-break deploy — the feedback sensor keeps
+working across the change instead of failing with a `500`. But until
+`wrangler secret put ADMIN_API_TOKEN` actually runs in production, the two
+credentials remain one string and S5's central point (a machine credential and a
+human credential that rotate independently) is not yet true of the running
+system. Nothing warns that the fallback is in use, and the deploy list does not
+mention the new secret (see S16).
+
+**Fix spec.** Set the secret in production; add it to the deploy sequence and to
+`.dev.vars.example`; and report which credential is in force on `/health` (a
+boolean like `adminApiTokenSeparate`, never the value) so the fallback cannot be
+load-bearing without anyone noticing.
+
+**Effort.** Trivial, and it is the cheapest remaining security win.
+
+---
+
+## S12 — The webhook target guard does not resolve DNS
+
+**Severity: low as deployed.** **Verified** that the guard is bypassable by name;
+production egress behaviour **unverified**.
+
+`validateWebhookUrl` inspects the URL's host textually, so it catches literal
+addresses and `localhost` but not a hostname that *resolves* to a private one.
+
+**Exploit scenario.** `http://127.0.0.1.nip.io:9966/hook` passed the address
+guard, answered the challenge, and was saved with `webhook_verified_at` set —
+a stored webhook target pointing at loopback. In that reproduction the attacker
+had to control something listening on the Worker's loopback, which on
+Cloudflare's edge they do not, so this is not a live SSRF.
+
+The sharper version is **DNS rebinding**: point the hostname at your own public
+server, let it echo the challenge, get verified, then repoint the name at
+`169.254.169.254` or RFC1918. Nothing re-resolves or re-challenges afterwards, so
+every later delivery goes to the new address. What actually stands in the way
+today is the challenge at save time plus whatever the platform refuses to route —
+neither of which is a control Heard owns or monitors.
+
+**Fix spec.** Resolve the hostname at save time (Cloudflare DNS over HTTPS is
+available from a Worker) and reject when any A/AAAA answer is non-public; re-run
+the challenge periodically for verified webhooks and disable on failure, which
+also catches an endpoint that has quietly changed hands. Accepting the residual
+is defensible — say so explicitly in the code comment rather than leaving the
+guard looking complete.
+
+**Effort.** Small for the save-time resolution; medium for periodic re-verification.
+
+## S13 — `/health` reports one degraded counter under two names
+
+**Severity: low.** **Verified.**
+
+```
+GET /health -> {... "rateLimiterDegraded":0, "rateLimitDegraded":0 ...}
+```
+
+Both read `rateLimitDegradedCount()`. There is one counter and two keys.
+
+**Exploit scenario.** Not an attack, an operational trap. Two names imply two
+measurements — a reader reasonably assumes one covers the request limiter and the
+other the webhook delivery cap, which would be a useful distinction and is not
+what the code does. A sensor gets thresholded on one of them; a later cleanup
+removes "the duplicate"; the alert silently stops firing and fail-open becomes
+invisible again, which is the exact condition R2 existed to end.
+
+**Fix spec.** Keep one key. If the other must stay for a sensor already
+configured against it, leave a comment saying which is canonical and when the
+alias goes. Separately, the webhook delivery cap fails open through its own
+`catch` and is **not** counted anywhere — either count it into the same figure or
+give it the second key those two names imply.
+
+**Effort.** Trivial.
+
+## S14 — The per-source share penalises shared egress addresses
+
+**Severity: low-medium (availability, not confidentiality).** **Verified.**
+
+`SOURCE_SHARE = 0.2` with `Math.max(1, Math.floor(limit * SOURCE_SHARE))` means
+one IP may take a fifth of a site's window. This is the right shape against an
+abuser and the wrong shape for anyone behind a shared address.
+
+**Exploit scenario.** No attacker required — this one fires on legitimate use. At
+the default 30/hour a whole office, campus, school or mobile carrier NAT gets six
+reports per hour *collectively*, while the site itself sits at 6 of 30 used. The
+seventh colleague to report the same outage is told "You have sent a lot of
+feedback to this site recently." Worse at small caps: an owner who sets
+`hourly_cap=3` gets `floor(3 * 0.2) = 0`, raised to the floor of 1 — **one report
+per hour per source address**, so two people behind one NAT cannot both file.
+Verified: the share refused an address at 6/hour while other addresses were still
+served.
+
+**Fix spec.** Key the share on a coarser unit than a single address (an IPv4 /24
+and an IPv6 /64 are the usual choice) so a NAT is one bucket rather than one
+visitor; or keep per-address counting but let the share scale — a floor of 1 is
+too aggressive under a cap below ~10. Whichever is chosen, say in the refusal
+message that the limit is per source rather than per site, so a colleague reading
+it does not conclude the site is broken. The alternative is a deliberate
+`hourly_cap` floor below which the share is not applied at all.
+
+**Effort.** Small.
+
+## S15 — The site limit tells owners to delete a site; nothing can delete a site
+
+**Severity: low.** **Verified.**
+
+`SITES_PER_OWNER = 5` refuses the sixth site with *"You have reached the limit of
+5 sites. Delete one, or ask us to raise it."* There is no delete route for a site
+or a report anywhere in `src/index.ts`, so the first remedy offered is
+impossible and the second is an email nobody has been given.
+
+This is the same missing capability as S8.3, now surfaced to users: an owner who
+mistypes a site name is stuck with it, and a visitor who pastes a password into a
+feedback box cannot have it removed. The security consequence is that the only
+path to deleting data is a manual D1 statement run by the operator.
+
+**Fix spec.** Ship site deletion (cascading to its reports, confirmation
+required) and single-report deletion. Until then, change the message to describe
+what an owner can actually do. Note that deletion touches constitution rule 5, so
+the mechanism must be an owner deleting their own data, not the agent deleting
+anyone's.
+
+**Effort.** Small for the message, medium for real deletion.
+
+## S16 — The documentation describes a sign-in that no longer works
+
+**Severity: low (operational).** **Verified.**
+
+S5 made token login POST-only, but `CLAUDE.md:26` still tells a developer to
+visit `http://localhost:8787/login?token=dev-token` for break-glass sign-in. That
+URL now returns the login page and sets no cookie, so the documented path to a
+local dashboard is dead. `.dev.vars.example` and the `wrangler secret put`
+sequence also predate `ADMIN_API_TOKEN` and never mention it.
+
+The security relevance is not the stale line itself. It is that the deploy
+checklist is where `ADMIN_API_TOKEN` should have been added, and because it was
+not, the fallback in S5's status note is the default outcome for anyone following
+the documentation.
+
+**Fix spec.** In `CLAUDE.md`: replace the token URL with the form at `/login`,
+and add `wrangler secret put ADMIN_API_TOKEN` to the deploy sequence. In
+`.dev.vars.example`: add `ADMIN_API_TOKEN=dev-api-token` with a line saying it
+falls back to `ADMIN_TOKEN` when unset and that production should set both.
+
+**Effort.** Trivial. (Docs sit outside this reviewer's write scope beyond
+`SECURITY.md` and `docs/`, so this one needs assigning.)
+
+---
+
 ## What is already right
 
 Worth recording, so a future change does not undo it by accident:
@@ -467,16 +715,29 @@ Worth recording, so a future change does not undo it by accident:
 
 ## Prioritised hardening list
 
+Round 1 closed the original top five. What follows replaces it.
+
+### Round 1, for the record
+
+| # | Finding | Status |
+| --- | --- | --- |
+| 1 | **S1** prompt injection into the operator | fixed `4ee5bfa` |
+| 2 | **S2** write-quota and storage exhaustion | fixed `ebb02a4` |
+| 3 | **S3** webhook reflection and SSRF targets | fixed `f23a30a`, residual S12 |
+| 4 | **S6 + S7** headers-and-Origin middleware | fixed `41c2b92` |
+| 5 | **S5** `ADMIN_TOKEN` handling | partial `fdd1978` |
+
+### Top 3 next
+
 | # | Finding | Why first | Effort |
 | --- | --- | --- | --- |
-| 1 | **S1** prompt injection into the operator | Anonymous, remote, and the blast radius is the repo and the deployment. Mostly process, so it is also the cheapest. | S |
-| 2 | **S2** write-quota and storage exhaustion | Unauthenticated total outage for every tenant, against a quota we may not pay to raise. Partly in flight; the global cap and the per-owner site limit are not. | M |
-| 3 | **S3** webhook reflection and SSRF targets | Turns Heard into an attack tool against third parties. Destination filtering is an afternoon; target verification is what actually ends it. | S→M |
-| 4 | **S6 + S7** one headers-and-Origin middleware | Two medium findings closed by a few dozen lines, and it gives the `esc()` convention a second layer it currently does not have. | S |
-| 5 | **S5** `ADMIN_TOKEN` handling | The highest-value credential is handled the least carefully — in URLs, and verbatim in a cookie. | S |
+| 1 | **S5 completion + S16** | The one item where a shipped fix is not yet true of the running system. `ADMIN_API_TOKEN` falls back to `ADMIN_TOKEN`, so the machine and human credentials are still one string in production, and the deploy docs never gained the new secret. Setting one secret and editing two files finishes a finding already paid for. | Trivial |
+| 2 | **S14** per-source share vs shared addresses | The only round 1 change that refuses *legitimate* users, and it does so silently from the visitor's point of view. Every NAT — office, school, carrier — is one visitor sharing six reports an hour, or one an hour under a small cap. Availability findings that fire without an attacker tend to be discovered by users first. | Small |
+| 3 | **S8 + S15** retention and deletion | The last cluster touching user data directly: non-`done` reports with visitor email are kept indefinitely, production has never been observed pruning, and the product now tells owners to delete a site while offering no way to do it. Constitution rule 2 points here. | Small→Medium |
 
-S4 should ship alongside S2, since per-site caps are what make key-borrowing
-worth doing. S9, S10 and S11 are trivial and can ride along with any of the above.
+S12 and S13 are cheap and can ride along with any of the above; S13 in particular
+should be fixed before a sensor is pointed at either `/health` key. S9, S10 and
+S11 remain trivial and unclaimed.
 
 ## Review triggers
 
