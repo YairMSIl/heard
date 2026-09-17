@@ -99,5 +99,13 @@ CI runs tests and typecheck only; deploys are manual on purpose.
   add a route or a render path that prints an existing secret.
 - **Owner-scoped queries always filter by `owner_id`** (joining through `sites` when
   starting from a report), so a guessed id is not enough to read or mutate a row.
+- **`ADMIN_ALLOWED_SITES` in `src/admin.ts` is a security boundary, not a config list.**
+  It is the complete set of sites the shared `ADMIN_TOKEN` — and therefore the agent
+  operating Heard — may read feedback from or triage. Today that is Heard's own site and
+  the public demo. **Adding an entry grants the operating agent read access to that
+  site's feedback, so it is a deliberate, reviewed change, never a convenience.** Keep
+  the allow-list next to the auth in `src/admin.ts` rather than in route handlers: an
+  admin endpoint that forgets to scope itself is a data breach, and that mistake should
+  be hard to write rather than easy to miss in review.
 - Widget source must stay free of backticks and `${` — it is a TS template literal.
   Keep it under 8KB; a test enforces this.
