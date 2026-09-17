@@ -73,6 +73,16 @@ app.use('*', securityHeaders)
 const isHttps = (url: string) => new URL(url).protocol === 'https:'
 
 /**
+ * The only address we trust. `x-forwarded-for` used to be a fallback, but a
+ * caller sets that header themselves, so it let anyone mint a fresh rate-limit
+ * identity per request — the loosest possible outcome from the header most
+ * easily forged. An absent `cf-connecting-ip` now means "unidentifiable", and
+ * every unidentifiable request shares one bucket, which is the strictest.
+ */
+const UNIDENTIFIED = 'unidentified'
+const clientIp = (cfConnectingIp: string | undefined) => cfConnectingIp?.trim() || UNIDENTIFIED
+
+/**
  * The public key of Heard's own feedback site, so Heard's pages can carry the
  * widget. Returns null rather than throwing if the row is missing, because a
  * missing self site must degrade to "no widget", never to a broken page.
@@ -90,6 +100,13 @@ async function selfWidgetKey(env: Env): Promise<string | null> {
 /* ------------------------------------------------------------------ public */
 
 app.get('/health', async c => {
+  // /health is an unauthenticated database round-trip, so it gets the same
+  // first-line limiter as the report endpoint.
+  const healthIp = clientIp(c.req.header('cf-connecting-ip'))
+  if (!reportRateLimiter.check(`health:${healthIp}`).allowed) {
+    return c.json({ status: 'rate-limited' }, 429)
+  }
+
   let db: 'ok' | 'error' = 'ok'
   let detail: string | undefined
   // A stale cron is reported, never judged here: `status` stays 'ok' so the
@@ -102,7 +119,10 @@ app.get('/health', async c => {
     freshness = describePruneFreshness(row?.value ?? null)
   } catch (err) {
     db = 'error'
-    detail = err instanceof Error ? err.message : String(err)
+    // The real message goes to the log, not to an anonymous caller: D1 errors
+    // name tables and columns. Sensors alert on `db`, which is unchanged.
+    console.error('health db check failed', err instanceof Error ? err.message : err)
+    detail = 'database check failed'
   }
 
   return c.json({
@@ -137,7 +157,7 @@ const tooMany = (c: Context, retryAfterSeconds: number, message = 'Too many repo
   c.json({ error: message }, 429, { 'retry-after': String(Math.max(1, retryAfterSeconds)) })
 
 app.post('/api/report', async c => {
-  const ip = c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for') ?? 'unknown'
+  const ip = clientIp(c.req.header('cf-connecting-ip'))
 
   // First line: per-isolate and free. It cannot enforce a global limit, but it
   // absorbs an obvious burst without paying for a Durable Object round trip.

@@ -1,6 +1,10 @@
 /**
  * Fixed-window, in-memory rate limiter.
  *
+ * Keys come from `cf-connecting-ip` only. `x-forwarded-for` is caller-supplied,
+ * so trusting it would let anyone claim a new identity per request and bypass
+ * this entirely; requests without a trusted address share one bucket instead.
+ *
  * Workers isolates are per-colo and short-lived, so this is a best-effort
  * throttle rather than a global guarantee: a determined attacker spread across
  * colos gets more than `limit`. That is an accepted MVP trade-off — it costs

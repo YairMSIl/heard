@@ -16,3 +16,11 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      # Blocking: advisories in what actually ships to the Worker. The deployed
+      # bundle is our source plus hono; everything else is build and test tooling.
+      - run: npm audit --audit-level=high --omit=dev
+      # Informational: the full tree, including dev tooling. Not blocking, because
+      # clearing it currently needs a major vitest upgrade, and a CVE in a test
+      # runner cannot reach a deployed Worker — but it must stay visible.
+      - name: Audit dev toolchain (informational)
+        run: npm audit --audit-level=high || true
