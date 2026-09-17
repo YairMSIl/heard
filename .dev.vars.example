@@ -1,6 +1,10 @@
 # Copy to .dev.vars for local development. .dev.vars is gitignored.
-# Break-glass operator sign-in at /login?token=...
+# Break-glass operator sign-in: POST the value through the form at /login.
 ADMIN_TOKEN=dev-token
+# Bearer credential for /api/admin/*. Separate from ADMIN_TOKEN on purpose, so the
+# machine credential and the human one rotate independently. Production must set
+# both; if this is unset locally the admin API simply has no usable credential.
+ADMIN_API_TOKEN=dev-api-token
 # Signs session cookies. Any random string locally; a wrangler secret in production.
 SESSION_SECRET=dev-session-secret
 # A GitHub OAuth app whose callback URL is http://localhost:8787/auth/github/callback.

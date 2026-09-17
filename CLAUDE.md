@@ -23,7 +23,9 @@ Then:
 
 - <http://localhost:8787/demo> — a plain page with the widget embedded against the
   seeded demo site. Use it to exercise the whole loop.
-- <http://localhost:8787/login?token=dev-token> — break-glass operator sign-in.
+- <http://localhost:8787/login> — break-glass operator sign-in. Paste the `ADMIN_TOKEN`
+  into the form and submit; sign-in is **POST-only**, because a token in a URL lands in
+  history, referrers and proxy logs. A `GET /login?token=…` just renders the form.
   `/auth/github` is the normal path, but completing it locally needs a real OAuth app
   whose callback is `http://localhost:8787/auth/github/callback`.
 - <http://localhost:8787/sites/site_demo> — where demo reports land.
@@ -72,7 +74,8 @@ Typechecking runs three passes, and the split is load-bearing:
 ```bash
 wrangler d1 create heard                  # once; put database_id in wrangler.toml
 wrangler d1 migrations apply heard --remote
-wrangler secret put ADMIN_TOKEN           # 32-byte hex
+wrangler secret put ADMIN_TOKEN           # 32-byte hex, dashboard break-glass
+wrangler secret put ADMIN_API_TOKEN       # 32-byte hex, machine credential for /api/admin/*
 wrangler secret put SESSION_SECRET        # 32-byte hex
 wrangler secret put GITHUB_OAUTH_CLIENT_ID
 wrangler secret put GITHUB_OAUTH_CLIENT_SECRET
@@ -88,6 +91,11 @@ CI runs tests and typecheck only; deploys are manual on purpose.
 - **Nothing reaches HTML without `esc()`.** Report text is attacker-controlled.
 - **Validation lives in `src/validation.ts`, not in route handlers.** Routes translate
   results into status codes; the rules stay pure and unit-testable.
+- **Two admin credentials, deliberately.** `ADMIN_TOKEN` signs a human into the
+  dashboard; `ADMIN_API_TOKEN` is the bearer token for `/api/admin/*`. They are separate
+  so a leaked sensor credential does not also hand over the dashboard, and so either can
+  be rotated alone. Both must be set in production — `/health` reports
+  `adminApiTokenSeparate` so you can see at a glance whether they really are.
 - **`ADMIN_TOKEN` never goes in `wrangler.toml`.** Local: `.dev.vars` (gitignored).
   Production: `wrangler secret put ADMIN_TOKEN`.
 - **Auth resolves an owner, then gets out of the way.** `requireAuth` accepts either a

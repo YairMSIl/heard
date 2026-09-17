@@ -103,7 +103,9 @@ app.get('/health', async c => {
     pruneAgeHours: freshness.pruneAgeHours,
     // R2 renamed this; the old key stays one release so nothing reading it breaks.
     rateLimiterDegraded: rateLimitDegradedCount(),
-    rateLimitDegraded: rateLimitDegradedCount(),
+    // Boolean only: whether the two admin credentials are genuinely distinct.
+    // Never the values, never a hint at their length.
+    adminApiTokenSeparate: Boolean(c.env.ADMIN_API_TOKEN && c.env.ADMIN_API_TOKEN !== c.env.ADMIN_TOKEN),
     time: new Date().toISOString(),
   }, db === 'ok' ? 200 : 503)
 })
@@ -255,10 +257,14 @@ app.get('/demo', async c => {
 /**
  * The machine credential. Separate from the dashboard break-glass token so the
  * two rotate independently — a leaked sensor token must not also hand over the
- * dashboard. Falls back to ADMIN_TOKEN only so a deployment that has not set the
- * new secret yet keeps working; remove the fallback once it is set everywhere.
+ * dashboard.
+ *
+ * There is deliberately **no fallback to ADMIN_TOKEN**. A fallback would mean a
+ * deployment that forgot the secret silently accepts the dashboard password on
+ * the machine API, which is exactly the separation this exists to create; the
+ * admin API failing closed is the louder and safer outcome.
  */
-const adminApiToken = (env: Env) => env.ADMIN_API_TOKEN ?? env.ADMIN_TOKEN
+const adminApiToken = (env: Env) => env.ADMIN_API_TOKEN
 
 /**
  * Machine-facing endpoints for the agent that operates Heard: read feedback
