@@ -1,8 +1,10 @@
 export interface Env {
   DB: D1Database
   RATE_LIMITER: DurableObjectNamespace
-  /** Break-glass shared token; the normal way in is GitHub OAuth. */
+  /** Break-glass shared token for the dashboard; the normal way in is GitHub OAuth. */
   ADMIN_TOKEN?: string
+  /** Separate machine credential for /api/admin/*, rotatable independently. */
+  ADMIN_API_TOKEN?: string
   GITHUB_OAUTH_CLIENT_ID?: string
   GITHUB_OAUTH_CLIENT_SECRET?: string
   /** Signs session cookies. Rotating it signs everyone out. */

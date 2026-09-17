@@ -127,3 +127,49 @@ describe('fetchGithubUser', () => {
     vi.unstubAllGlobals()
   })
 })
+
+describe('timingSafeEqual does not leak length', () => {
+  it('still compares content correctly', () => {
+    expect(timingSafeEqual('abc', 'abc')).toBe(true)
+    expect(timingSafeEqual('abc', 'abd')).toBe(false)
+  })
+
+  it('returns false for different lengths without an early return', () => {
+    expect(timingSafeEqual('abc', 'abcd')).toBe(false)
+    expect(timingSafeEqual('', 'a')).toBe(false)
+    expect(timingSafeEqual('a'.repeat(64), 'a'.repeat(63))).toBe(false)
+  })
+
+  it('handles empty strings on both sides', () => {
+    expect(timingSafeEqual('', '')).toBe(true)
+  })
+
+  it('does not report a prefix as equal', () => {
+    const token = 'f'.repeat(64)
+    expect(timingSafeEqual(token.slice(0, 32), token)).toBe(false)
+    expect(timingSafeEqual(token, token.slice(0, 32))).toBe(false)
+  })
+
+  it('compares long tokens correctly in both directions', () => {
+    const a = 'a'.repeat(200), b = 'a'.repeat(200)
+    expect(timingSafeEqual(a, b)).toBe(true)
+    expect(timingSafeEqual(a, b.slice(0, 199) + 'b')).toBe(false)
+  })
+})
+
+describe('timingSafeEqual regression: tails must be compared', () => {
+  it('detects a difference beyond the minimum compare width', () => {
+    // Regression for a real bug: wrapping the index modulo each length meant
+    // characters past index 127 were never examined, so these compared equal.
+    for (const len of [129, 200, 512]) {
+      const a = 'a'.repeat(len)
+      expect(timingSafeEqual(a, a.slice(0, len - 1) + 'b')).toBe(false)
+      expect(timingSafeEqual(a, a)).toBe(true)
+    }
+  })
+
+  it('detects a difference in the very last character of a long token', () => {
+    const a = 'x'.repeat(300)
+    expect(timingSafeEqual(a, 'x'.repeat(299) + 'y')).toBe(false)
+  })
+})

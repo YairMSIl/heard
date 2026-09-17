@@ -38,7 +38,6 @@ import { errorPage, landingPage, loginPage, newSitePage, sitePage, sitesPage } f
 import { securityHeaders } from './security-headers'
 import { WIDGET_JS } from './widget'
 
-const ADMIN_COOKIE = 'heard_admin'
 const SESSION_COOKIE = 'heard_session'
 const OAUTH_STATE_COOKIE = 'heard_oauth_state'
 const LOCAL_OWNER_ID = 'own_local'
@@ -233,13 +232,21 @@ app.get('/demo', async c => {
 /* ------------------------------------------------------------- admin API */
 
 /**
+ * The machine credential. Separate from the dashboard break-glass token so the
+ * two rotate independently — a leaked sensor token must not also hand over the
+ * dashboard. Falls back to ADMIN_TOKEN only so a deployment that has not set the
+ * new secret yet keeps working; remove the fallback once it is set everywhere.
+ */
+const adminApiToken = (env: Env) => env.ADMIN_API_TOKEN ?? env.ADMIN_TOKEN
+
+/**
  * Machine-facing endpoints for the agent that operates Heard: read feedback
  * about Heard, and triage it, without holding a GitHub session. Scoped by
  * src/admin.ts to Heard's own site and the demo — the shared operator token is
  * deliberately not a key to customers' feedback.
  */
 app.get('/api/admin/reports', async c => {
-  const auth = authorizeAdmin(c.req.header('authorization'), c.env.ADMIN_TOKEN)
+  const auth = authorizeAdmin(c.req.header('authorization'), adminApiToken(c.env))
   if (!auth.ok) return c.json({ error: auth.error }, auth.status)
 
   const parsed = parseAdminReportQuery({
@@ -266,7 +273,7 @@ app.get('/api/admin/reports', async c => {
 })
 
 app.post('/api/admin/reports/:id/status', async c => {
-  const auth = authorizeAdmin(c.req.header('authorization'), c.env.ADMIN_TOKEN)
+  const auth = authorizeAdmin(c.req.header('authorization'), adminApiToken(c.env))
   if (!auth.ok) return c.json({ error: auth.error }, auth.status)
 
   let body: unknown
@@ -317,13 +324,11 @@ async function resolveOwner(c: Context<{ Bindings: Env; Variables: Vars }>): Pro
       const owner = await c.env.DB.prepare('SELECT * FROM owners WHERE id = ?')
         .bind(ownerId).first<OwnerRow>()
       // A valid signature for a deleted owner is not a session.
-      if (owner) return { id: owner.id, label: owner.login ? `@${owner.login}` : 'signed in' }
+      if (owner) {
+        const label = owner.login ? `@${owner.login}` : owner.id === LOCAL_OWNER_ID ? 'operator' : 'signed in'
+        return { id: owner.id, label }
+      }
     }
-  }
-
-  const adminCookie = getCookie(c, ADMIN_COOKIE)
-  if (c.env.ADMIN_TOKEN && adminCookie && timingSafeEqual(adminCookie, c.env.ADMIN_TOKEN)) {
-    return { id: LOCAL_OWNER_ID, label: 'operator' }
   }
 
   return null
@@ -343,19 +348,32 @@ const requireAuth: MiddlewareHandler<{ Bindings: Env; Variables: Vars }> = async
 
 app.get('/login', c => {
   const githubEnabled = Boolean(c.env.GITHUB_OAUTH_CLIENT_ID && c.env.GITHUB_OAUTH_CLIENT_SECRET && c.env.SESSION_SECRET)
-  const token = c.req.query('token')
-  if (token === undefined) return c.html(loginPage(undefined, githubEnabled))
+  return c.html(loginPage(undefined, githubEnabled))
+})
 
-  if (!c.env.ADMIN_TOKEN) {
+/**
+ * Token sign-in is POST-only. The old `GET /login?token=` put the secret in the
+ * URL, where it lands in browser history, referrers and any proxy log; there is
+ * no way to use that form safely, so it is gone rather than deprecated.
+ *
+ * On success we mint the same signed session cookie the OAuth path uses. The
+ * cookie now carries a name and a proof rather than the bearer token itself, so
+ * stealing it yields nothing reusable elsewhere.
+ */
+app.post('/login', async c => {
+  const githubEnabled = Boolean(c.env.GITHUB_OAUTH_CLIENT_ID && c.env.GITHUB_OAUTH_CLIENT_SECRET && c.env.SESSION_SECRET)
+  if (!c.env.ADMIN_TOKEN || !c.env.SESSION_SECRET) {
     return c.html(loginPage('Token sign-in is not configured on this deployment.', githubEnabled), 500)
   }
+
+  const form = await c.req.formData()
+  const token = String(form.get('token') ?? '')
   if (!timingSafeEqual(token, c.env.ADMIN_TOKEN)) {
     return c.html(loginPage('That token is not right.', githubEnabled), 401)
   }
 
-  setCookie(c, ADMIN_COOKIE, token, {
+  setCookie(c, SESSION_COOKIE, await createSession(c.env.SESSION_SECRET, LOCAL_OWNER_ID), {
     httpOnly: true,
-    // Nothing in Heard needs a cookie to survive a cross-site navigation.
     sameSite: 'Strict',
     path: '/',
     secure: isHttps(c.req.url),
@@ -365,7 +383,6 @@ app.get('/login', c => {
 })
 
 app.post('/logout', c => {
-  deleteCookie(c, ADMIN_COOKIE, { path: '/' })
   deleteCookie(c, SESSION_COOKIE, { path: '/' })
   return c.redirect('/login', 302)
 })

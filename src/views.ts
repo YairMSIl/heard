@@ -113,7 +113,7 @@ export function loginPage(error?: string, githubEnabled = true): string {
       ? `<p><a class="gh" href="/auth/github">Continue with GitHub</a></p>
          <p class="or">or use the operator token</p>`
       : `<div class="err">GitHub sign-in is not configured on this deployment.</div>`}
-    <form class="card" method="get" action="/login">
+    <form class="card" method="post" action="/login">
       <label for="token">Operator token</label>
       <input id="token" name="token" type="password" autocomplete="current-password">
       <p><button type="submit">Sign in with token</button></p>

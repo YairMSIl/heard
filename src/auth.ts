@@ -15,10 +15,25 @@
 
 const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
 
+/**
+ * Constant-time compare that does not leak length either. The earlier version
+ * returned immediately on a length mismatch, so timing revealed how long the
+ * secret was; here both sides are padded to a fixed width first and the length
+ * difference is folded into the result.
+ */
+const COMPARE_WIDTH = 128
+
 export function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false
-  let diff = 0
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  // The loop must cover *both* strings in full — an earlier version wrapped the
+  // index modulo each length and so never compared anything past COMPARE_WIDTH,
+  // which made two long tokens differing only in their tail compare equal. It
+  // also runs a minimum number of rounds so a short guess does not finish
+  // measurably faster than a full-length one.
+  const width = Math.max(a.length, b.length, COMPARE_WIDTH)
+  let diff = a.length ^ b.length
+  for (let i = 0; i < width; i++) {
+    diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0)
+  }
   return diff === 0
 }
 
