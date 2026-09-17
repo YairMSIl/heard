@@ -21,6 +21,6 @@
     "jsdom": "^25.0.1",
     "typescript": "^5.7.2",
     "vitest": "^4.1.11",
-    "wrangler": "^4.0.0"
+    "wrangler": "^4.134.0"
   }
 }
