@@ -35,6 +35,7 @@ import {
   parseAdminStatus,
 } from './admin'
 import { errorPage, landingPage, loginPage, newSitePage, sitePage, sitesPage } from './views'
+import { securityHeaders } from './security-headers'
 import { WIDGET_JS } from './widget'
 
 const ADMIN_COOKIE = 'heard_admin'
@@ -46,6 +47,9 @@ const SELF_SITE_ID = 'site_self'
 type Vars = { ownerId: string; ownerLabel: string }
 
 const app = new Hono<{ Bindings: Env; Variables: Vars }>()
+
+// First in the chain: headers on everything, cross-origin POSTs refused.
+app.use('*', securityHeaders)
 
 const isHttps = (url: string) => new URL(url).protocol === 'https:'
 
@@ -351,7 +355,8 @@ app.get('/login', c => {
 
   setCookie(c, ADMIN_COOKIE, token, {
     httpOnly: true,
-    sameSite: 'Lax',
+    // Nothing in Heard needs a cookie to survive a cross-site navigation.
+    sameSite: 'Strict',
     path: '/',
     secure: isHttps(c.req.url),
     maxAge: 60 * 60 * 24 * 30,
@@ -376,6 +381,10 @@ app.get('/auth/github', c => {
   // and httpOnly so it cannot be planted from another page.
   setCookie(c, OAUTH_STATE_COOKIE, state, {
     httpOnly: true,
+    // Deliberately Lax, not Strict, unlike the auth cookies: GitHub redirects
+    // the user back to us, which is a cross-site navigation. Strict here would
+    // drop this cookie on the callback and break every sign-in with "that
+    // sign-in link expired". Do not "tidy" this to Strict.
     sameSite: 'Lax',
     path: '/',
     secure: isHttps(c.req.url),
@@ -432,7 +441,7 @@ app.get('/auth/github/callback', async c => {
 
   setCookie(c, SESSION_COOKIE, await createSession(sessionSecret, owner.id), {
     httpOnly: true,
-    sameSite: 'Lax',
+    sameSite: 'Strict',
     path: '/',
     secure: isHttps(c.req.url),
     maxAge: 60 * 60 * 24 * 30,
