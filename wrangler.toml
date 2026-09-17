@@ -11,10 +11,10 @@ compatibility_date = "2025-09-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "heard"
-# Placeholder: `wrangler d1 create heard` fills this in for remote use.
+# Created with `wrangler d1 create heard` (region WEUR).
 # Local dev (`wrangler dev`) uses a local SQLite file under .wrangler/state and
 # ignores this id entirely.
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "cde604b3-118a-4296-a9af-e9ff6898d898"
 
 [triggers]
 # Daily retention sweep (03:17 UTC, off the top of the hour to avoid the
