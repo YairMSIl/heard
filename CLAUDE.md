@@ -4,11 +4,18 @@ Hosted embeddable feedback widget on Cloudflare Workers + D1. See `README.md` fo
 
 ## Run it locally
 
-**Node 22 is required** (`.nvmrc`, and `engines` in `package.json`). The machine's
-default Node is 20 for other projects, so **every command in `app/` must run under 22**:
-`nvm use` from this directory, or prefix one-offs with `nvm exec 22 …`. Running `npm
-test` or `wrangler` under Node 20 fails with a module-resolution error rather than
-anything that names the real cause.
+**Node 22 is required** (`.nvmrc`, and `engines` in `package.json`). This machine's nvm
+default is deliberately still 20 for other projects, so **run `nvm use` from `app/`**
+(it reads `.nvmrc`) or prefix one-offs with `nvm exec 22 …`.
+
+The failure modes differ, which is worth knowing before you debug the wrong thing:
+
+- **`wrangler` hard-refuses** — *"Wrangler requires at least Node.js v22.0.0"* — so
+  `dev`, `deploy` and `d1` simply do not run under 20.
+- **`vitest` and `tsc` currently run fine on 20** despite declaring Node 22, because npm
+  `engines` are advisory unless `engine-strict` is set. Green tests under Node 20 are
+  therefore *not* evidence that the toolchain is supported there; CI runs 22, and that is
+  the version this project is tested on.
 
 ```bash
 nvm use            # reads .nvmrc -> 22
