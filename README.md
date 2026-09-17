@@ -10,11 +10,12 @@ JSON. It runs entirely on Cloudflare Workers + D1, so a small site costs nothing
 ## Embed snippet
 
 ```html
-<script src="https://heard.yairms.workers.dev/widget.js?key=YOUR_PUBLIC_KEY" defer></script>
+<script src="https://HEARD-HOST/widget.js?key=YOUR_PUBLIC_KEY" defer></script>
 ```
 
 The public key identifies a site; it grants no read access, so it is safe in page source.
-Grab the exact snippet for a site from its dashboard page at `/sites/<id>`.
+Grab the exact snippet — with the real host filled in — from the site's dashboard page
+at `/sites/<id>`.
 
 ## Webhook payload
 
