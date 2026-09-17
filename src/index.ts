@@ -17,6 +17,12 @@ import {
   timingSafeEqual,
   verifySession,
 } from './auth'
+import {
+  authorizeAdmin,
+  isAdminAllowedSite,
+  parseAdminReportQuery,
+  parseAdminStatus,
+} from './admin'
 import { errorPage, landingPage, loginPage, newSitePage, sitePage, sitesPage } from './views'
 import { WIDGET_JS } from './widget'
 
@@ -170,6 +176,68 @@ app.get('/demo', async c => {
 </div>
 <script src="/widget.js?key=${site.public_key}" defer><\/script>
 </body></html>`)
+})
+
+/* ------------------------------------------------------------- admin API */
+
+/**
+ * Machine-facing endpoints for the agent that operates Heard: read feedback
+ * about Heard, and triage it, without holding a GitHub session. Scoped by
+ * src/admin.ts to Heard's own site and the demo — the shared operator token is
+ * deliberately not a key to customers' feedback.
+ */
+app.get('/api/admin/reports', async c => {
+  const auth = authorizeAdmin(c.req.header('authorization'), c.env.ADMIN_TOKEN)
+  if (!auth.ok) return c.json({ error: auth.error }, auth.status)
+
+  const parsed = parseAdminReportQuery({
+    site: c.req.query('site'),
+    since: c.req.query('since'),
+    status: c.req.query('status'),
+    limit: c.req.query('limit'),
+  })
+  if (!parsed.ok) return c.json({ error: parsed.error }, parsed.status)
+  const { site, since, status, limit } = parsed.value
+
+  const conditions = ['site_id = ?']
+  const bindings: (string | number)[] = [site]
+  if (since !== null) { conditions.push('created_at > ?'); bindings.push(since) }
+  if (status !== null) { conditions.push('status = ?'); bindings.push(status) }
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, site_id, type, message, email, page_url, user_agent, viewport, status, created_at
+     FROM reports WHERE ${conditions.join(' AND ')} ORDER BY created_at ASC LIMIT ?`,
+  ).bind(...bindings, limit).all<ReportRow>()
+
+  const reports = (results ?? []).map(r => ({ ...r, created_at_iso: new Date(r.created_at).toISOString() }))
+  return c.json({ site, count: reports.length, reports })
+})
+
+app.post('/api/admin/reports/:id/status', async c => {
+  const auth = authorizeAdmin(c.req.header('authorization'), c.env.ADMIN_TOKEN)
+  if (!auth.ok) return c.json({ error: auth.error }, auth.status)
+
+  let body: unknown
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ error: 'body must be valid JSON' }, 400)
+  }
+  const parsed = parseAdminStatus((body as Record<string, unknown>)?.status)
+  if (!parsed.ok) return c.json({ error: parsed.error }, parsed.status)
+
+  const report = await c.env.DB.prepare('SELECT id, site_id, status FROM reports WHERE id = ?')
+    .bind(c.req.param('id')).first<{ id: string; site_id: string; status: string }>()
+  if (!report) return c.json({ error: 'no such report' }, 404)
+  // Scope is checked against the row's real site, not against anything the
+  // caller supplied, so a report id alone cannot reach a customer's data.
+  if (!isAdminAllowedSite(report.site_id)) {
+    return c.json({ error: 'that report is out of scope for the admin API' }, 403)
+  }
+
+  await c.env.DB.prepare('UPDATE reports SET status = ? WHERE id = ?')
+    .bind(parsed.value, report.id).run()
+  return c.json({ ok: true, id: report.id, status: parsed.value, previousStatus: report.status })
 })
 
 /* -------------------------------------------------------------------- auth */
