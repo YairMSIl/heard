@@ -1,0 +1,17 @@
+{
+  // Tests run under vitest on Node, so they may use node: builtins — the webhook
+  // test verifies our Web Crypto HMAC against node:crypto. They still import
+  // Worker code, hence both type packages.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "types": ["@cloudflare/workers-types", "node"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "exclude": ["test/widget-dom.test.ts"]
+}

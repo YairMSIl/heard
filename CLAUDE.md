@@ -42,8 +42,13 @@ UI — so widget regressions fail the build rather than the demo.
 Route behaviour is verified by hand against `wrangler dev` with curl. If route tests
 become worth automating, add `@cloudflare/vitest-pool-workers` rather than mocking D1.
 
-Typechecking runs twice: `tsconfig.json` for Worker code (no `lib.dom`, which would
-collide with `@cloudflare/workers-types`) and `tsconfig.dom.json` for the jsdom test.
+Typechecking runs three passes, and the split is load-bearing:
+
+- `tsconfig.json` — `src/` with Worker types **only**. Importing `node:crypto` or
+  touching `document` in Worker code fails here instead of at runtime.
+- `tsconfig.test.json` — tests on Node, so `node:` builtins are allowed.
+- `tsconfig.dom.json` — the jsdom test, the only place `lib.dom` is in scope
+  (it collides with `@cloudflare/workers-types`).
 
 ## Layout
 

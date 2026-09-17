@@ -7,7 +7,7 @@
     "dev": "wrangler dev --test-scheduled",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.dom.json",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.dom.json",
     "db:migrate:local": "wrangler d1 migrations apply heard --local",
     "db:migrate:remote": "wrangler d1 migrations apply heard --remote",
     "deploy": "wrangler deploy"
@@ -17,6 +17,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241218.0",
+    "@types/node": "^20.19.43",
     "jsdom": "^25.0.1",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8",
