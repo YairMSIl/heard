@@ -14,8 +14,8 @@
  */
 export const WIDGET_JS = `(function () {
   'use strict';
-  if (window.__fbwidget) return;
-  window.__fbwidget = true;
+  if (window.__heard) return;
+  window.__heard = true;
 
   var script = document.currentScript;
   if (!script) {
@@ -27,7 +27,7 @@ export const WIDGET_JS = `(function () {
   var src = new URL(script.src, location.href);
   var key = src.searchParams.get('key') || script.getAttribute('data-key');
   var api = src.origin + '/api/report';
-  if (!key) { console.warn('[fbwidget] missing ?key= on script tag'); return; }
+  if (!key) { console.warn('[Heard] missing ?key= on script tag'); return; }
 
   var LABEL = script.getAttribute('data-label') || 'Feedback';
   var TYPES = [
@@ -37,7 +37,7 @@ export const WIDGET_JS = `(function () {
   ];
 
   var host = document.createElement('div');
-  host.setAttribute('data-fbwidget', '');
+  host.setAttribute('data-heard', '');
   var root = host.attachShadow({ mode: 'open' });
   var css = [
     ':host{all:initial}',

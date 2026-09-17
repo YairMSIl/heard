@@ -12,3 +12,10 @@ export function randomId(length = 16): string {
 export const newSiteId = () => `site_${randomId(12)}`
 export const newReportId = () => `rep_${randomId(16)}`
 export const newPublicKey = () => `pk_${randomId(24)}`
+
+/**
+ * Webhook signing secret. Longer than the ids above because this one is a
+ * shared secret rather than a lookup handle: 40 chars of the 33-symbol alphabet
+ * is roughly 200 bits.
+ */
+export const newWebhookSecret = () => `whsec_${randomId(40)}`

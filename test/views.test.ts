@@ -4,7 +4,7 @@ import type { ReportRow, SiteRow } from '../src/types'
 
 const site: SiteRow = {
   id: 'site_1', owner_id: 'own_local', name: 'Example', public_key: 'pk_abc',
-  webhook_url: null, created_at: 0,
+  webhook_url: null, webhook_secret: null, created_at: 0,
 }
 
 describe('esc', () => {
@@ -33,7 +33,30 @@ describe('sitePage', () => {
   })
 
   it('includes an embed snippet for the site key', () => {
-    const html = sitePage(site, [], 'https://fb.example.com')
-    expect(html).toContain('https://fb.example.com/widget.js?key=pk_abc')
+    const html = sitePage(site, [], 'https://heard.example.com')
+    expect(html).toContain('https://heard.example.com/widget.js?key=pk_abc')
+  })
+
+  it('shows a signing secret only on the response that generated it', () => {
+    const secret = 'whsec_supersecretvalue'
+    const revealed = sitePage({ ...site, webhook_secret: secret }, [], 'https://h.test', { revealedSecret: secret })
+    expect(revealed).toContain(secret)
+    expect(revealed).toMatch(/not shown again/i)
+
+    // A later page load knows a secret exists but never reprints it.
+    const later = sitePage({ ...site, webhook_secret: secret }, [], 'https://h.test')
+    expect(later).not.toContain(secret)
+    expect(later).toMatch(/signing secret is set/i)
+  })
+
+  it('offers to generate a secret when the site has none', () => {
+    expect(sitePage(site, [], 'https://h.test')).toContain('Generate secret')
+    expect(sitePage({ ...site, webhook_secret: 'whsec_x' }, [], 'https://h.test')).toContain('Regenerate secret')
+  })
+
+  it('shows who is signed in and a sign-out control', () => {
+    const html = sitePage(site, [], 'https://h.test', { who: '@octocat' })
+    expect(html).toContain('@octocat')
+    expect(html).toContain('action="/logout"')
   })
 })

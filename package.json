@@ -1,15 +1,15 @@
 {
-  "name": "fbwidget",
+  "name": "heard",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --test-scheduled",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.dom.json",
-    "db:migrate:local": "wrangler d1 migrations apply fbwidget --local",
-    "db:migrate:remote": "wrangler d1 migrations apply fbwidget --remote",
+    "db:migrate:local": "wrangler d1 migrations apply heard --local",
+    "db:migrate:remote": "wrangler d1 migrations apply heard --remote",
     "deploy": "wrangler deploy"
   },
   "dependencies": {

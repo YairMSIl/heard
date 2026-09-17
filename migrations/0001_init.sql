@@ -1,4 +1,4 @@
--- fbwidget initial schema.
+-- Heard initial schema.
 --
 -- `owners` exists from day one even though MVP auth is a single shared admin
 -- token: when GitHub OAuth lands, each GitHub user becomes a row here and

@@ -17,7 +17,7 @@ function loadWidget(): ShadowRoot {
   // document.currentScript at our tag and evaluate the source.
   Object.defineProperty(document, 'currentScript', { value: script, configurable: true })
   new Function(WIDGET_JS)()
-  const host = document.querySelector('[data-fbwidget]')
+  const host = document.querySelector('[data-heard]')
   expect(host).not.toBeNull()
   return (host as HTMLElement).shadowRoot!
 }
@@ -27,7 +27,7 @@ describe('widget in a page', () => {
     document.head.innerHTML = ''
     document.body.innerHTML = ''
     // @ts-expect-error resetting the load guard between tests
-    delete window.__fbwidget
+    delete window.__heard
   })
 
   it('renders a launcher button into a shadow root, panel closed', () => {
@@ -91,6 +91,6 @@ describe('widget in a page', () => {
   it('does not install itself twice', () => {
     loadWidget()
     new Function(WIDGET_JS)()
-    expect(document.querySelectorAll('[data-fbwidget]')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-heard]')).toHaveLength(1)
   })
 })

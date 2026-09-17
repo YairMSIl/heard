@@ -1,6 +1,20 @@
 export interface Env {
   DB: D1Database
+  /** Break-glass shared token; the normal way in is GitHub OAuth. */
   ADMIN_TOKEN?: string
+  GITHUB_OAUTH_CLIENT_ID?: string
+  GITHUB_OAUTH_CLIENT_SECRET?: string
+  /** Signs session cookies. Rotating it signs everyone out. */
+  SESSION_SECRET?: string
+}
+
+export interface OwnerRow {
+  id: string
+  provider: string
+  external_id: string | null
+  email: string | null
+  login: string | null
+  created_at: number
 }
 
 export type ReportType = 'bug' | 'idea' | 'praise'
@@ -15,6 +29,7 @@ export interface SiteRow {
   name: string
   public_key: string
   webhook_url: string | null
+  webhook_secret: string | null
   created_at: number
 }
 

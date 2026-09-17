@@ -1,2 +1,9 @@
 # Copy to .dev.vars for local development. .dev.vars is gitignored.
+# Break-glass operator sign-in at /login?token=...
 ADMIN_TOKEN=dev-token
+# Signs session cookies. Any random string locally; a wrangler secret in production.
+SESSION_SECRET=dev-session-secret
+# A GitHub OAuth app whose callback URL is http://localhost:8787/auth/github/callback.
+# Leave the placeholders to exercise the redirect without completing a sign-in.
+GITHUB_OAUTH_CLIENT_ID=local-client-id
+GITHUB_OAUTH_CLIENT_SECRET=local-client-secret

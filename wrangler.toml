@@ -1,4 +1,4 @@
-name = "fbwidget"
+name = "heard"
 main = "src/index.ts"
 compatibility_date = "2025-09-01"
 
@@ -10,8 +10,13 @@ compatibility_date = "2025-09-01"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "fbwidget"
-# Placeholder: `wrangler d1 create fbwidget` fills this in for remote use.
+database_name = "heard"
+# Placeholder: `wrangler d1 create heard` fills this in for remote use.
 # Local dev (`wrangler dev`) uses a local SQLite file under .wrangler/state and
 # ignores this id entirely.
 database_id = "00000000-0000-0000-0000-000000000000"
+
+[triggers]
+# Daily retention sweep (03:17 UTC, off the top of the hour to avoid the
+# stampede every other cron on the platform joins).
+crons = ["17 3 * * *"]

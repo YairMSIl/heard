@@ -12,7 +12,7 @@ describe('WIDGET_JS', () => {
 
   it('isolates itself in a shadow root and guards against double-loading', () => {
     expect(WIDGET_JS).toContain("attachShadow({ mode: 'open' })")
-    expect(WIDGET_JS).toContain('window.__fbwidget')
+    expect(WIDGET_JS).toContain('window.__heard')
   })
 
   it('derives the API origin from its own script src', () => {
