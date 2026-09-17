@@ -1,0 +1,17 @@
+name = "fbwidget"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+# ADMIN_TOKEN is a secret in production:
+#   wrangler secret put ADMIN_TOKEN
+# For local dev it is read from .dev.vars (gitignored, see .dev.vars.example).
+[vars]
+# Nothing here on purpose. Do not put ADMIN_TOKEN in this file.
+
+[[d1_databases]]
+binding = "DB"
+database_name = "fbwidget"
+# Placeholder: `wrangler d1 create fbwidget` fills this in for remote use.
+# Local dev (`wrangler dev`) uses a local SQLite file under .wrangler/state and
+# ignores this id entirely.
+database_id = "00000000-0000-0000-0000-000000000000"

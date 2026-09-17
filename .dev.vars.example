@@ -1,0 +1,2 @@
+# Copy to .dev.vars for local development. .dev.vars is gitignored.
+ADMIN_TOKEN=dev-token
