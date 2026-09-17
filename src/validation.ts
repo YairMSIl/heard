@@ -91,6 +91,69 @@ export function truncateUserAgent(value: string | null | undefined): string | nu
 /** Only http(s) webhooks; anything else is a misconfiguration or an SSRF attempt. */
 export type UrlResult = { ok: true; value: string | null } | { ok: false; error: string }
 
+const MAX_ORIGINS = 20
+
+/**
+ * Parses an owner-supplied origin allow-list (newline or comma separated) into
+ * a canonical `scheme://host[:port]` list. Stored as a newline-joined string.
+ *
+ * Empty means "any origin" — the MVP default. This check raises the cost of
+ * abuse without eliminating it: a non-browser client can send any `Origin` it
+ * likes, so this stops opportunistic key reuse from a real browser, not a
+ * determined attacker. Said plainly in the dashboard too.
+ */
+export function parseAllowedOrigins(input: unknown): { ok: true; value: string | null } | { ok: false; error: string } {
+  const raw = typeof input === 'string' ? input.trim() : ''
+  if (!raw) return { ok: true, value: null }
+
+  const parts = raw.split(/[\n,]+/).map(p => p.trim()).filter(Boolean)
+  if (parts.length > MAX_ORIGINS) return { ok: false, error: `at most ${MAX_ORIGINS} origins` }
+
+  const origins: string[] = []
+  for (const part of parts) {
+    let url: URL
+    try {
+      url = new URL(part.includes('://') ? part : `https://${part}`)
+    } catch {
+      return { ok: false, error: `"${part}" is not a valid origin` }
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return { ok: false, error: `"${part}" must be http or https` }
+    }
+    if (!origins.includes(url.origin)) origins.push(url.origin)
+  }
+  return { ok: true, value: origins.join('\n') }
+}
+
+export function allowedOriginList(stored: string | null | undefined): string[] {
+  return (stored ?? '').split('\n').map(o => o.trim()).filter(Boolean)
+}
+
+/** No list configured means no restriction; that is the documented default. */
+export function isOriginAllowed(origin: string | null | undefined, stored: string | null | undefined): boolean {
+  const list = allowedOriginList(stored)
+  if (list.length === 0) return true
+  if (!origin) return false
+  try {
+    return list.includes(new URL(origin).origin)
+  } catch {
+    return false
+  }
+}
+
+/** A cap field: blank clears the override back to the default, never to "unlimited". */
+export function parseCap(input: unknown): { ok: true; value: number | null } | { ok: false; error: string } {
+  const raw = typeof input === 'string' ? input.trim() : ''
+  if (!raw) return { ok: true, value: null }
+  // Plain digits only. `Number('1e3')` is a valid integer, but someone typing
+  // that into a cap field is more likely confused than deliberate.
+  if (!/^\d+$/.test(raw)) return { ok: false, error: 'caps must be whole numbers of 1 or more' }
+  const n = Number(raw)
+  if (n < 1) return { ok: false, error: 'caps must be whole numbers of 1 or more' }
+  if (n > 1_000_000) return { ok: false, error: 'that cap is unreasonably large' }
+  return { ok: true, value: n }
+}
+
 export function validateWebhookUrl(value: string | null | undefined): UrlResult {
   const raw = asString(value)?.trim()
   if (!raw) return { ok: true, value: null }

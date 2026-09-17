@@ -8,7 +8,15 @@ import { newPublicKey, newReportId, newSiteId, newWebhookSecret, randomId } from
 import { reportRateLimiter } from './ratelimit'
 import { consumeIp, consumeSite, peekSite } from './ratelimit-client'
 import { resolveCaps } from './limits'
-import { truncateUserAgent, validateReportInput, validateWebhookUrl } from './validation'
+import {
+  allowedOriginList,
+  isOriginAllowed,
+  parseAllowedOrigins,
+  parseCap,
+  truncateUserAgent,
+  validateReportInput,
+  validateWebhookUrl,
+} from './validation'
 import { buildRateLimitedPayload, buildWebhookPayload, deliverWebhook } from './webhook'
 import { describePruneFreshness, LAST_PRUNE_KEY, pruneReports } from './retention'
 import {
@@ -126,6 +134,13 @@ app.post('/api/report', async c => {
   const site = await c.env.DB.prepare('SELECT * FROM sites WHERE public_key = ?')
     .bind(key).first<SiteRow>()
   if (!site) return c.json({ error: 'unknown site key' }, 404)
+
+  // An origin lock is the owner's choice, checked before we spend any of their
+  // cap: a rejected foreign submission must not consume the budget it was
+  // trying to exhaust.
+  if (!isOriginAllowed(c.req.header('origin'), site.allowed_origins)) {
+    return c.json({ error: 'this site does not accept reports from that origin' }, 403)
+  }
 
   // Per-site caps come after the site is known, and before validation: a cap is
   // about how much of our capacity one site may consume, and a malformed body
@@ -466,16 +481,25 @@ async function loadReports(c: { env: Env }, siteId: string): Promise<ReportRow[]
   return results ?? []
 }
 
-app.get('/sites/:id', async c => {
-  const site = await loadSite(c, c.req.param('id'), c.get('ownerId'))
-  if (!site) return c.html(errorPage(404, 'No such site.'), 404)
-  return c.html(sitePage(site, await loadReports(c, site.id), new URL(c.req.url).origin, {
+async function renderSite(
+  c: Context<{ Bindings: Env; Variables: Vars }>,
+  site: SiteRow,
+  extra: { error?: string; ok?: string; revealedSecret?: string } = {},
+): Promise<string> {
+  return sitePage(site, await loadReports(c, site.id), new URL(c.req.url).origin, {
     who: c.get('ownerLabel'),
     widgetKey: await selfWidgetKey(c.env),
     usage: (await peekSite(c.env, site.id, site)).usage,
     caps: resolveCaps(site),
-    flash: c.req.query('saved') ? { ok: 'Saved.' } : undefined,
-  }))
+    revealedSecret: extra.revealedSecret,
+    flash: extra.error || extra.ok ? { error: extra.error, ok: extra.ok } : undefined,
+  })
+}
+
+app.get('/sites/:id', async c => {
+  const site = await loadSite(c, c.req.param('id'), c.get('ownerId'))
+  if (!site) return c.html(errorPage(404, 'No such site.'), 404)
+  return c.html(await renderSite(c, site, c.req.query('saved') ? { ok: 'Saved.' } : {}))
 })
 
 app.post('/sites/:id/webhook', async c => {
@@ -484,14 +508,38 @@ app.post('/sites/:id/webhook', async c => {
 
   const form = await c.req.formData()
   const parsed = validateWebhookUrl(String(form.get('webhook_url') ?? ''))
-  if (!parsed.ok) {
-    return c.html(sitePage(site, await loadReports(c, site.id), new URL(c.req.url).origin, {
-      who: c.get('ownerLabel'),
-      flash: { error: parsed.error },
-    }), 400)
-  }
+  if (!parsed.ok) return c.html(await renderSite(c, site, { error: parsed.error }), 400)
   await c.env.DB.prepare('UPDATE sites SET webhook_url = ? WHERE id = ?')
     .bind(parsed.value, site.id).run()
+  return c.redirect(`/sites/${site.id}?saved=1`, 302)
+})
+
+app.post('/sites/:id/settings', async c => {
+  const site = await loadSite(c, c.req.param('id'), c.get('ownerId'))
+  if (!site) return c.html(errorPage(404, 'No such site.'), 404)
+
+  const form = await c.req.formData()
+  const origins = parseAllowedOrigins(form.get('allowed_origins'))
+  const hourly = parseCap(form.get('hourly_cap'))
+  const daily = parseCap(form.get('daily_cap'))
+
+  const failure = [origins, hourly, daily].find(r => !r.ok) as { ok: false; error: string } | undefined
+  if (failure) {
+    return c.html(await renderSite(c, site, { error: failure.error }), 400)
+  }
+  if (hourly.ok && daily.ok && hourly.value && daily.value && hourly.value > daily.value) {
+    return c.html(await renderSite(c, site, {
+      error: 'the hourly cap cannot be larger than the daily cap',
+    }), 400)
+  }
+
+  await c.env.DB.prepare('UPDATE sites SET allowed_origins = ?, hourly_cap = ?, daily_cap = ? WHERE id = ?')
+    .bind(
+      (origins as { value: string | null }).value,
+      (hourly as { value: number | null }).value,
+      (daily as { value: number | null }).value,
+      site.id,
+    ).run()
   return c.redirect(`/sites/${site.id}?saved=1`, 302)
 })
 
@@ -504,8 +552,7 @@ app.post('/sites/:id/secret', async c => {
 
   // Rendered rather than redirected: a redirect would have to carry the secret
   // in a URL, which lands in history, logs and referrers.
-  return c.html(sitePage({ ...site, webhook_secret: secret }, await loadReports(c, site.id),
-    new URL(c.req.url).origin, { revealedSecret: secret, who: c.get('ownerLabel') }))
+  return c.html(await renderSite(c, { ...site, webhook_secret: secret }, { revealedSecret: secret }))
 })
 
 app.post('/reports/:id/status', async c => {

@@ -33,6 +33,7 @@ export interface SiteRow {
   webhook_secret: string | null
   hourly_cap: number | null
   daily_cap: number | null
+  allowed_origins: string | null
   created_at: number
 }
 

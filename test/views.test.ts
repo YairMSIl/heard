@@ -4,7 +4,7 @@ import type { ReportRow, SiteRow } from '../src/types'
 
 const site: SiteRow = {
   id: 'site_1', owner_id: 'own_local', name: 'Example', public_key: 'pk_abc',
-  webhook_url: null, webhook_secret: null, hourly_cap: null, daily_cap: null, created_at: 0,
+  webhook_url: null, webhook_secret: null, hourly_cap: null, daily_cap: null, allowed_origins: null, created_at: 0,
 }
 
 describe('esc', () => {

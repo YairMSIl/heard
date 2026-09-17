@@ -1,4 +1,5 @@
 import type { ReportRow, SiteRow } from './types'
+import { allowedOriginList } from './validation'
 import type { WindowUsage } from './limits'
 
 /** Every interpolation into HTML goes through this. No exceptions. */
@@ -29,7 +30,8 @@ const STYLES = `
   a.site{display:block;text-decoration:none;color:inherit}
   a.site:hover{border-color:#9ca3af}
   label{display:block;font-size:13px;font-weight:600;margin:0 0 5px}
-  input[type=text],input[type=url],input[type=password]{width:100%;padding:9px;border:1px solid #d1d5db;border-radius:8px;font:inherit}
+  input[type=text],input[type=url],input[type=password],textarea{width:100%;padding:9px;border:1px solid #d1d5db;border-radius:8px;font:inherit}
+  textarea{min-height:70px;resize:vertical;font-family:ui-monospace,Menlo,monospace;font-size:13px}
   button{border:0;border-radius:8px;background:var(--accent);color:#fff;padding:9px 16px;font:inherit;font-weight:600;cursor:pointer}
   button.ghost{background:#fff;color:var(--ink);border:1px solid #d1d5db;padding:5px 10px;font-size:13px;font-weight:500}
   button.ghost[aria-pressed=true]{background:var(--ink);color:#fff;border-color:var(--ink)}
@@ -209,6 +211,32 @@ export function sitePage(
 
     <h2>Embed snippet</h2>
     <div class="card"><pre>${esc(snippet)}</pre></div>
+
+    <h2>Settings</h2>
+    <form class="card" method="post" action="/sites/${esc(site.id)}/settings">
+      <label for="allowed_origins">Allowed origins (one per line)</label>
+      <textarea id="allowed_origins" name="allowed_origins" rows="3"
+        placeholder="https://example.com&#10;https://www.example.com">${esc(allowedOriginList(site.allowed_origins).join('\n'))}</textarea>
+      <p class="meta">Leave empty to accept reports from anywhere, which is the default.
+        Locking the key to your domains stops someone lifting it from your page source and
+        filing reports from elsewhere. It raises the cost of abuse rather than removing it:
+        a non-browser client can claim any origin it likes.</p>
+      <div class="row">
+        <div style="flex:1">
+          <label for="hourly_cap">Hourly cap</label>
+          <input id="hourly_cap" name="hourly_cap" type="text" inputmode="numeric"
+            placeholder="${esc(caps?.hourly ?? 30)} (default)" value="${esc(site.hourly_cap ?? '')}">
+        </div>
+        <div style="flex:1">
+          <label for="daily_cap">Daily cap</label>
+          <input id="daily_cap" name="daily_cap" type="text" inputmode="numeric"
+            placeholder="${esc(caps?.daily ?? 200)} (default)" value="${esc(site.daily_cap ?? '')}">
+        </div>
+      </div>
+      <p class="meta">Blank restores the default. Lowering a cap takes effect immediately,
+        so a site already past the new limit stops accepting reports until the window resets.</p>
+      <p><button type="submit">Save settings</button></p>
+    </form>
 
     <h2>Webhook</h2>
     <form class="card" method="post" action="/sites/${esc(site.id)}/webhook">
