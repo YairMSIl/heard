@@ -9,7 +9,7 @@ export const WEBHOOK_DELIVERIES_PER_HOUR = 60
 export interface RateLimitedPayload {
   event: 'report.rate_limited'
   site: { id: string; name: string }
-  limit: { window: string; limit: number; count: number; resetAt: string }
+  limit: { window: string; limit: number; count: number; resetAt: string; distinctSources: number }
   message: string
 }
 
@@ -54,13 +54,22 @@ export function buildWebhookPayload(siteName: string, report: ReportRow): Webhoo
  */
 export function buildRateLimitedPayload(
   site: { id: string; name: string },
-  limit: { window: string; limit: number; count: number; resetAt: number },
+  limit: { window: string; limit: number; count: number; resetAt: number; distinctSources?: number },
 ): RateLimitedPayload {
+  const distinctSources = limit.distinctSources ?? 0
+  // The source count is the difference between "we are popular today" and
+  // "one machine is hammering us", which is the first thing an owner asks.
+  const shape = distinctSources === 1
+    ? 'All of it came from a single source address.'
+    : distinctSources > 1
+      ? `It came from ${distinctSources} distinct source addresses.`
+      : ''
   return {
     event: 'report.rate_limited',
     site: { id: site.id, name: site.name },
-    limit: { ...limit, resetAt: new Date(limit.resetAt).toISOString() },
-    message: `Heard is refusing new reports for "${site.name}": the ${limit.window} cap of ${limit.limit} was reached. Submissions resume after the window resets. You will not get another notice today.`,
+    limit: { ...limit, distinctSources, resetAt: new Date(limit.resetAt).toISOString() },
+    message: `Heard is refusing new reports for "${site.name}": the ${limit.window} cap of ${limit.limit} was reached. ${shape} `.trim()
+      + ' Submissions resume after the window resets. You will not get another notice today.',
   }
 }
 

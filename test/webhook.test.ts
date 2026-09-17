@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createHmac } from 'node:crypto'
-import { buildWebhookPayload, deliverWebhook, signBody } from '../src/webhook'
+import { buildRateLimitedPayload, buildWebhookPayload, deliverWebhook, signBody } from '../src/webhook'
 import type { ReportRow } from '../src/types'
 
 const report: ReportRow = {
@@ -85,5 +85,27 @@ describe('deliverWebhook', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('nope', { status: 500 })))
     await expect(deliverWebhook('https://hook.test/x', buildWebhookPayload('E', report))).resolves.toBe(false)
     vi.unstubAllGlobals()
+  })
+})
+
+describe('rate-limited payload carries source shape (R1.3)', () => {
+  const site = { id: 'site_1', name: 'Example' }
+  const base = { window: 'hour', limit: 30, count: 30, resetAt: 1_700_000_000_000 }
+
+  it('names a single source explicitly', () => {
+    const p = buildRateLimitedPayload(site, { ...base, distinctSources: 1 })
+    expect(p.limit.distinctSources).toBe(1)
+    expect(p.message).toMatch(/single source address/)
+  })
+
+  it('reports a spread of sources', () => {
+    const p = buildRateLimitedPayload(site, { ...base, distinctSources: 17 })
+    expect(p.message).toMatch(/17 distinct source addresses/)
+  })
+
+  it('says nothing about sources when the count is unknown', () => {
+    const p = buildRateLimitedPayload(site, base)
+    expect(p.limit.distinctSources).toBe(0)
+    expect(p.message).not.toMatch(/source address/)
   })
 })

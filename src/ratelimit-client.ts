@@ -1,5 +1,14 @@
 import type { Env } from './types'
-import { deploymentWindows, ipWindows, siteWindows, type SiteCaps, type WindowSpec, type WindowUsage } from './limits'
+import {
+  deploymentWindows,
+  hashSource,
+  ipWindows,
+  siteWindows,
+  sourceShareWindows,
+  type SiteCaps,
+  type WindowSpec,
+  type WindowUsage,
+} from './limits'
 import type { ConsumeResponse } from './rate-limiter-do'
 
 export interface LimitDecision {
@@ -8,6 +17,7 @@ export interface LimitDecision {
   blockedWindow: string | null
   usage: WindowUsage[]
   notify: boolean
+  distinctSources: number
   /** True when the Durable Object could not be reached and we allowed anyway. */
   degraded: boolean
 }
@@ -18,6 +28,7 @@ const ALLOW_ON_ERROR: LimitDecision = {
   blockedWindow: null,
   usage: [],
   notify: false,
+  distinctSources: 0,
   degraded: true,
 }
 
@@ -35,13 +46,14 @@ async function call(
   specs: WindowSpec[],
   action: 'consume' | 'peek',
   notifyOnce = false,
+  source?: string,
 ): Promise<LimitDecision> {
   try {
     const stub = env.RATE_LIMITER.get(env.RATE_LIMITER.idFromName(key))
     const res = await stub.fetch('https://rate-limiter/', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ action, specs, notifyOnce }),
+      body: JSON.stringify({ action, specs, notifyOnce, source }),
     })
     if (!res.ok) throw new Error(`rate limiter returned ${res.status}`)
     const body = (await res.json()) as ConsumeResponse
@@ -60,8 +72,18 @@ async function call(
 export const consumeIp = (env: Env, ip: string) =>
   call(env, `ip:${ip}`, ipWindows(), 'consume')
 
-export const consumeSite = (env: Env, siteId: string, caps: SiteCaps) =>
-  call(env, `site:${siteId}`, siteWindows(caps), 'consume', true)
+/**
+ * `notifyOnce` is spent only when there is somewhere to deliver the notice.
+ * Otherwise the first refusal of the day would burn the once-per-day marker on a
+ * site with no webhook, and a later refusal — after an owner configures one —
+ * would be silent until tomorrow.
+ */
+export const consumeSite = (env: Env, siteId: string, caps: SiteCaps, hasWebhook: boolean, ip: string) =>
+  call(env, `site:${siteId}`, siteWindows(caps), 'consume', hasWebhook, hashSource(ip))
+
+/** One source's share of a site, so a single address cannot starve the rest. */
+export const consumeSiteSource = (env: Env, siteId: string, caps: SiteCaps, ip: string) =>
+  call(env, `site:${siteId}|ip:${hashSource(ip)}`, sourceShareWindows(caps), 'consume')
 
 export const consumeDeployment = (env: Env) =>
   call(env, 'deployment:all', deploymentWindows(), 'consume')

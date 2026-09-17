@@ -13,6 +13,8 @@ function fakeState() {
       storage: {
         get: async <T>(key: string) => store.get(key) as T | undefined,
         put: async (key: string, value: unknown) => void store.set(key, value),
+        setAlarm: async (time: number) => void store.set('__alarm', time),
+        deleteAll: async () => void store.clear(),
       },
     } as unknown as DurableObjectState,
   }
@@ -110,7 +112,8 @@ describe('RateLimiterDO', () => {
       await call(limiter, { action: 'consume', specs, notifyOnce: true, now: NOW + i * 1000 })
     }
     // Two window records plus the notice marker. Nothing accumulates per request.
-    expect([...store.keys()].sort()).toEqual(['notified_day', 'w:day', 'w:hour'])
+    expect([...store.keys()].filter(k => !k.startsWith('__')).sort())
+      .toEqual(['notified_day', 'w:day', 'w:hour'])
   })
 })
 
@@ -134,7 +137,7 @@ describe('the limiter client fails open', () => {
 
   it('fails open for site caps and the dashboard peek too', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    expect(await consumeSite(brokenEnv, 'site_x', {})).toMatchObject({ allowed: true, degraded: true })
+    expect(await consumeSite(brokenEnv, 'site_x', {}, false, '1.2.3.4')).toMatchObject({ allowed: true, degraded: true })
     expect(await peekSite(brokenEnv, 'site_x', {})).toMatchObject({ allowed: true, degraded: true, usage: [] })
     spy.mockRestore()
   })
@@ -159,13 +162,15 @@ describe('the limiter client fails open', () => {
           fetch: async () => Response.json({
             allowed: false, blockedWindow: 'day', retryAfterSeconds: 42,
             usage: [{ name: 'day', count: 200, limit: 200, resetAt: 1 }], notify: true,
+            distinctSources: 3,
           }),
         }),
       },
     } as unknown as Env
-    expect(await consumeSite(env, 'site_x', {})).toEqual({
+    expect(await consumeSite(env, 'site_x', {}, true, '1.2.3.4')).toEqual({
       allowed: false, blockedWindow: 'day', retryAfterSeconds: 42,
-      usage: [{ name: 'day', count: 200, limit: 200, resetAt: 1 }], notify: true, degraded: false,
+      usage: [{ name: 'day', count: 200, limit: 200, resetAt: 1 }],
+      notify: true, distinctSources: 3, degraded: false,
     })
   })
 })
@@ -184,5 +189,48 @@ describe('degraded counter', () => {
     // The log carries the running total, so one tailed line tells you the scale.
     expect(spy.mock.calls.some(c => String(c[2]).startsWith('degraded_total='))).toBe(true)
     spy.mockRestore()
+  })
+})
+
+describe('R-series review findings', () => {
+  it('counts distinct sources and reports them (R1.3)', async () => {
+    const { state } = fakeState()
+    const limiter = new RateLimiterDO(state)
+    for (const src of ['aaa', 'bbb', 'aaa', 'ccc']) {
+      await call(limiter, { action: 'consume', specs: [{ name: 'day', ms: DAY_MS, limit: 99 }], source: src, now: NOW })
+    }
+    const last = await call(limiter, { action: 'peek', specs: [{ name: 'day', ms: DAY_MS, limit: 99 }], now: NOW })
+    expect((last as unknown as { distinctSources: number }).distinctSources).toBe(3)
+  })
+
+  it('clamps a caller-supplied limit against policy (R5)', async () => {
+    const { state } = fakeState()
+    const limiter = new RateLimiterDO(state)
+    // Ask for a minute window of a million; policy says 10.
+    const results: boolean[] = []
+    for (let i = 0; i < 12; i++) {
+      results.push((await call(limiter, {
+        action: 'consume', specs: [{ name: 'minute', ms: 60_000, limit: 1_000_000 }], now: NOW,
+      })).allowed)
+    }
+    expect(results.filter(Boolean)).toHaveLength(10)
+  })
+
+  it('sets an alarm so an idle instance cleans itself up (R4)', async () => {
+    const { state, store } = fakeState()
+    const limiter = new RateLimiterDO(state)
+    await call(limiter, { action: 'consume', specs, now: NOW })
+    const alarm = store.get('__alarm') as number
+    // The alarm is the furthest reset, so nothing is wiped while still counting.
+    expect(alarm).toBe(Math.max(...specs.map(s => (Math.floor(NOW / s.ms) + 1) * s.ms)))
+  })
+
+  it('the alarm empties the instance', async () => {
+    const { state, store } = fakeState()
+    const limiter = new RateLimiterDO(state)
+    await call(limiter, { action: 'consume', specs, source: 'aaa', now: NOW })
+    expect(store.size).toBeGreaterThan(0)
+    await limiter.alarm()
+    expect(store.size).toBe(0)
   })
 })

@@ -13,6 +13,14 @@ export const DEPLOYMENT_DAILY_CAP = 5000
 export const DEPLOYMENT_HOURLY_CAP = 1000
 /** Sign-in is open to any GitHub account, so site creation needs its own ceiling. */
 export const SITES_PER_OWNER = 5
+/**
+ * One source may take at most this share of a site's window. The site-wide
+ * number stays the ceiling; this stops a single address consuming all of it and
+ * starving the site's real visitors.
+ */
+export const SOURCE_SHARE = 0.2
+/** Distinct sources tracked per window, so the DO's storage cannot grow without bound. */
+export const MAX_TRACKED_SOURCES = 500
 export const DEFAULT_HOURLY_CAP = 30
 export const DEFAULT_DAILY_CAP = 200
 
@@ -69,6 +77,43 @@ export function siteWindows(site: SiteCaps | null | undefined): WindowSpec[] {
     { name: 'hour', ms: HOUR_MS, limit: caps.hourly },
     { name: 'day', ms: DAY_MS, limit: caps.daily },
   ]
+}
+
+/** A site's windows scaled to one source's share, never below 1. */
+export function sourceShareWindows(site: SiteCaps | null | undefined): WindowSpec[] {
+  return siteWindows(site).map(w => ({ ...w, limit: Math.max(1, Math.floor(w.limit * SOURCE_SHARE)) }))
+}
+
+/**
+ * Partition key for a source within a site. Hashed (FNV-1a) rather than raw so
+ * visitor addresses are not written into Durable Object instance names; it is a
+ * bucketing key, not a security boundary.
+ */
+export function hashSource(value: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < value.length; i++) {
+    h ^= value.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h.toString(16).padStart(8, '0')
+}
+
+/**
+ * Ceiling a caller may ask for in any window. The Durable Object clamps every
+ * incoming spec against these, so a bug or a compromised caller cannot request a
+ * limit of a million and quietly disable the protection.
+ */
+export const MAX_ALLOWED_LIMIT: Record<WindowName, number> = {
+  minute: IP_PER_MINUTE,
+  hour: DEPLOYMENT_HOURLY_CAP,
+  day: DEPLOYMENT_DAILY_CAP,
+}
+
+export function clampSpecs(specs: WindowSpec[]): WindowSpec[] {
+  return specs.map(spec => ({
+    ...spec,
+    limit: Math.max(1, Math.min(spec.limit, MAX_ALLOWED_LIMIT[spec.name] ?? spec.limit)),
+  }))
 }
 
 export function ipWindows(): WindowSpec[] {

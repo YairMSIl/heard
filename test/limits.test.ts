@@ -9,8 +9,11 @@ import {
   DEPLOYMENT_DAILY_CAP,
   DEPLOYMENT_HOURLY_CAP,
   SITES_PER_OWNER,
+  clampSpecs,
   deploymentWindows,
   evaluateWindows,
+  hashSource,
+  sourceShareWindows,
   ipWindows,
   resolveCaps,
   siteWindows,
@@ -157,5 +160,44 @@ describe('deployment ceiling', () => {
   it('cannot be reached by the per-owner site allowance alone', () => {
     // 5 sites x 200/day is the most one owner can legitimately generate.
     expect(SITES_PER_OWNER * DEFAULT_DAILY_CAP).toBeLessThan(DEPLOYMENT_DAILY_CAP)
+  })
+})
+
+describe('per-source share of a site (R1.1)', () => {
+  it('gives one source a fifth of each window, never zero', () => {
+    expect(sourceShareWindows({ hourly_cap: 30, daily_cap: 200 }).map(w => w.limit)).toEqual([6, 40])
+    // A tiny cap must still leave one submission possible.
+    expect(sourceShareWindows({ hourly_cap: 1, daily_cap: 2 }).map(w => w.limit)).toEqual([1, 1])
+  })
+
+  it('keeps the site-wide number as the real ceiling', () => {
+    const site = siteWindows({ hourly_cap: 30, daily_cap: 200 })
+    const source = sourceShareWindows({ hourly_cap: 30, daily_cap: 200 })
+    source.forEach((w, i) => expect(w.limit).toBeLessThan(site[i].limit))
+  })
+})
+
+describe('hashSource', () => {
+  it('is stable and differs between addresses', () => {
+    expect(hashSource('1.2.3.4')).toBe(hashSource('1.2.3.4'))
+    expect(hashSource('1.2.3.4')).not.toBe(hashSource('1.2.3.5'))
+  })
+  it('does not leak the address it came from', () => {
+    expect(hashSource('203.0.113.9')).not.toContain('203')
+    expect(hashSource('203.0.113.9')).toMatch(/^[0-9a-f]{8}$/)
+  })
+})
+
+describe('clampSpecs (R5)', () => {
+  it('caps a caller asking for an absurd limit', () => {
+    const clamped = clampSpecs([{ name: 'day', ms: DAY_MS, limit: 10_000_000 }])
+    expect(clamped[0].limit).toBe(DEPLOYMENT_DAILY_CAP)
+  })
+  it('leaves legitimate limits alone', () => {
+    expect(clampSpecs([{ name: 'hour', ms: HOUR_MS, limit: 30 }])[0].limit).toBe(30)
+    expect(clampSpecs([{ name: 'minute', ms: MINUTE_MS, limit: 10 }])[0].limit).toBe(10)
+  })
+  it('never clamps below 1', () => {
+    expect(clampSpecs([{ name: 'hour', ms: HOUR_MS, limit: 0 }])[0].limit).toBe(1)
   })
 })

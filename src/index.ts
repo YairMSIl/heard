@@ -6,7 +6,14 @@ import type { Env, OwnerRow, ReportRow, ReportStatus, SiteRow } from './types'
 import { REPORT_STATUSES } from './types'
 import { newPublicKey, newReportId, newSiteId, newWebhookSecret, randomId } from './ids'
 import { reportRateLimiter } from './ratelimit'
-import { consumeDeployment, consumeIp, consumeSite, peekSite, rateLimitDegradedCount } from './ratelimit-client'
+import {
+  consumeDeployment,
+  consumeIp,
+  consumeSite,
+  consumeSiteSource,
+  peekSite,
+  rateLimitDegradedCount,
+} from './ratelimit-client'
 import { resolveCaps, SITES_PER_OWNER } from './limits'
 import {
   allowedOriginList,
@@ -94,6 +101,8 @@ app.get('/health', async c => {
     detail,
     lastPruneAt: freshness.lastPruneAt,
     pruneAgeHours: freshness.pruneAgeHours,
+    // R2 renamed this; the old key stays one release so nothing reading it breaks.
+    rateLimiterDegraded: rateLimitDegradedCount(),
     rateLimitDegraded: rateLimitDegradedCount(),
     time: new Date().toISOString(),
   }, db === 'ok' ? 200 : 503)
@@ -162,12 +171,21 @@ app.post('/api/report', async c => {
   // Per-site caps come after the site is known, and before validation: a cap is
   // about how much of our capacity one site may consume, and a malformed body
   // consumes it just the same.
-  const siteLimit = await consumeSite(c.env, site.id, site)
+  // One source's share first: if this address has already taken its slice, the
+  // refusal must not also consume the site-wide budget it is trying to starve.
+  const sourceLimit = await consumeSiteSource(c.env, site.id, site, ip)
+  if (!sourceLimit.allowed) {
+    return tooMany(c, sourceLimit.retryAfterSeconds,
+      'You have sent a lot of feedback to this site recently. Please try again later.')
+  }
+
+  const siteLimit = await consumeSite(c.env, site.id, site, Boolean(site.webhook_url), ip)
   if (!siteLimit.allowed) {
     const blocked = siteLimit.usage.find(u => u.name === siteLimit.blockedWindow)
     if (siteLimit.notify && site.webhook_url && blocked) {
       c.executionCtx.waitUntil(deliverAndRecord(c.env, site, buildRateLimitedPayload(site, {
         window: blocked.name, limit: blocked.limit, count: blocked.count, resetAt: blocked.resetAt,
+        distinctSources: siteLimit.distinctSources,
       })))
     }
     return tooMany(c, siteLimit.retryAfterSeconds,
