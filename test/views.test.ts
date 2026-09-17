@@ -58,21 +58,21 @@ describe('sitePage', () => {
   it('shows usage against the caps when the limiter answered', () => {
     const html = sitePage(site, [], 'https://h.test', {
       usage: [
-        { name: 'hour', count: 4, limit: 30, resetAt: Date.parse('2026-09-17T20:00:00Z') },
-        { name: 'day', count: 12, limit: 200, resetAt: Date.parse('2026-09-18T00:00:00Z') },
+        { name: 'hour', count: 4, limit: 60, resetAt: Date.parse('2026-09-17T20:00:00Z') },
+        { name: 'day', count: 12, limit: 500, resetAt: Date.parse('2026-09-18T00:00:00Z') },
       ],
-      caps: { hourly: 30, daily: 200 },
+      caps: { hourly: 60, daily: 500 },
     })
-    expect(html).toContain('of 30 this hour')
-    expect(html).toContain('of 200 this day')
+    expect(html).toContain('of 60 this hour')
+    expect(html).toContain('of 500 this day')
     expect(html).toContain('2026-09-17 20:00 UTC')
   })
 
   it('says so plainly when usage could not be read, rather than showing zero', () => {
     // Zero would read as "no traffic", which is a different and wrong claim.
-    const html = sitePage(site, [], 'https://h.test', { caps: { hourly: 30, daily: 200 } })
+    const html = sitePage(site, [], 'https://h.test', { caps: { hourly: 60, daily: 500 } })
     expect(html).toMatch(/usage is unavailable/i)
-    expect(html).toContain('30/hour and 200/day')
+    expect(html).toContain('60/hour and 500/day')
   })
 
   it('warns on the dashboard when a webhook was auto-disabled', () => {

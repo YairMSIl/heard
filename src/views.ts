@@ -1,6 +1,6 @@
 import type { ReportRow, SiteRow } from './types'
 import { allowedOriginList } from './validation'
-import type { WindowUsage } from './limits'
+import { DEFAULT_DAILY_CAP, DEFAULT_HOURLY_CAP, type WindowUsage } from './limits'
 
 /** Every interpolation into HTML goes through this. No exceptions. */
 export function esc(value: unknown): string {
@@ -238,12 +238,12 @@ export function sitePage(
         <div style="flex:1">
           <label for="hourly_cap">Hourly cap</label>
           <input id="hourly_cap" name="hourly_cap" type="text" inputmode="numeric"
-            placeholder="${esc(caps?.hourly ?? 30)} (default)" value="${esc(site.hourly_cap ?? '')}">
+            placeholder="${esc(caps?.hourly ?? DEFAULT_HOURLY_CAP)} (default)" value="${esc(site.hourly_cap ?? '')}">
         </div>
         <div style="flex:1">
           <label for="daily_cap">Daily cap</label>
           <input id="daily_cap" name="daily_cap" type="text" inputmode="numeric"
-            placeholder="${esc(caps?.daily ?? 200)} (default)" value="${esc(site.daily_cap ?? '')}">
+            placeholder="${esc(caps?.daily ?? DEFAULT_DAILY_CAP)} (default)" value="${esc(site.daily_cap ?? '')}">
         </div>
       </div>
       <p class="meta">Blank restores the default. Lowering a cap takes effect immediately,

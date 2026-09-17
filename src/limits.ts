@@ -20,17 +20,17 @@ export const SITES_PER_OWNER = 5
  */
 export const SOURCE_SHARE = 0.2
 /**
- * Below this cap the share is not applied at all. At 30/hour a fifth is 6, which
- * is a usable allowance; at 3/hour `floor(3 * 0.2)` is 0 and the floor of 1 would
- * mean two people behind one office NAT cannot both file a report. A small cap is
- * already the owner saying "I expect very little traffic", so the site-wide number
- * is protection enough.
+ * Below this cap the share is not applied at all. At the 60/hour default a fifth
+ * is 12, which is a usable allowance; at 3/hour `floor(3 * 0.2)` is 0 and the
+ * floor of 1 would mean two people behind one office NAT cannot both file a
+ * report. A small cap is already the owner saying "I expect very little
+ * traffic", so the site-wide number is protection enough.
  */
 export const SOURCE_SHARE_MIN_CAP = 10
 /** Distinct sources tracked per window, so the DO's storage cannot grow without bound. */
 export const MAX_TRACKED_SOURCES = 500
-export const DEFAULT_HOURLY_CAP = 30
-export const DEFAULT_DAILY_CAP = 200
+export const DEFAULT_HOURLY_CAP = 60
+export const DEFAULT_DAILY_CAP = 500
 
 export const MINUTE_MS = 60_000
 export const HOUR_MS = 60 * MINUTE_MS

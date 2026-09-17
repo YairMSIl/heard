@@ -27,7 +27,7 @@ describe('resolveCaps', () => {
   it('falls back to defaults for null columns', () => {
     expect(resolveCaps(null)).toEqual({ hourly: DEFAULT_HOURLY_CAP, daily: DEFAULT_DAILY_CAP })
     expect(resolveCaps({ hourly_cap: null, daily_cap: null }))
-      .toEqual({ hourly: 30, daily: 200 })
+      .toEqual({ hourly: 60, daily: 500 })
   })
 
   it('honours per-site overrides', () => {
@@ -159,7 +159,9 @@ describe('deployment ceiling', () => {
   })
 
   it('cannot be reached by the per-owner site allowance alone', () => {
-    // 5 sites x 200/day is the most one owner can legitimately generate.
+    // 5 sites x 500/day = 2500 is the most one owner can legitimately generate,
+    // which must stay under the 5000/day deployment ceiling.
+    expect(SITES_PER_OWNER * DEFAULT_DAILY_CAP).toBe(2500)
     expect(SITES_PER_OWNER * DEFAULT_DAILY_CAP).toBeLessThan(DEPLOYMENT_DAILY_CAP)
   })
 })
@@ -253,6 +255,7 @@ describe('the share is not applied to small caps (S14)', () => {
   })
 
   it('still applies at the defaults', () => {
-    expect(sourceShareWindows({ hourly_cap: null, daily_cap: null }).map(w => w.limit)).toEqual([6, 40])
+    // 20% of the new 60/500 defaults.
+    expect(sourceShareWindows({ hourly_cap: null, daily_cap: null }).map(w => w.limit)).toEqual([12, 100])
   })
 })
