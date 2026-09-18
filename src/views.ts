@@ -1,4 +1,5 @@
 import type { ReportRow, SiteRow } from './types'
+import type { AuditRow } from './audit'
 import { allowedOriginList } from './validation'
 import { DEFAULT_DAILY_CAP, DEFAULT_HOURLY_CAP, type WindowUsage } from './limits'
 import { WIDGET_VERSION } from './widget-version'
@@ -303,6 +304,13 @@ export function sitePage(
     <h2>Reports (${reports.length})</h2>
     ${list}
 
+    <h2>Audit</h2>
+    <div class="card">
+      <p class="meta">Who changed what on this site, including reads by the operator's
+        admin API.</p>
+      <p><a href="/sites/${esc(site.id)}/audit"><button class="ghost" type="button">View audit log</button></a></p>
+    </div>
+
     <h2>Danger zone</h2>
     <div class="card">
       <p class="meta">Deleting this site removes its reports permanently. Nobody can
@@ -382,6 +390,57 @@ export function landingPage(origin: string, widgetKey?: string | null): string {
       Support: <a href="${ISSUES_URL}">GitHub Issues</a>.
       ${widgetKey ? 'Found a problem on this page? The Feedback button in the corner reports it to Heard itself.' : ''}
     </p>`, { nav: false, widgetKey })
+}
+
+/** Actions an owner would recognise, rendered from the machine-readable action key. */
+const AUDIT_LABELS: Record<string, string> = {
+  'admin.reports.read': 'Feedback read over the admin API',
+  'report.status': 'Report status changed',
+  'report.delete': 'Report deleted',
+  'site.delete': 'Site deleted',
+  'site.settings': 'Site settings changed',
+  'webhook.verified': 'Webhook saved and verified',
+  'webhook.cleared': 'Webhook removed',
+  'webhook.secret.regenerate': 'Signing secret regenerated',
+  'retention.prune': 'Scheduled retention sweep',
+}
+
+const auditActor = (actor: string) =>
+  actor === 'admin-api' ? 'Heard operator (admin API)'
+    : actor === 'cron' ? 'Scheduled job'
+      : actor.startsWith('own_') ? 'You' : actor
+
+export function auditPage(site: SiteRow, rows: AuditRow[], who?: string | null): string {
+  const list = rows.length
+    ? rows.map(r => {
+      const when = new Date(r.ts).toISOString().replace('T', ' ').slice(0, 19)
+      let detail = ''
+      try {
+        const parsed = r.detail ? JSON.parse(r.detail) as Record<string, unknown> : null
+        if (parsed) {
+          detail = Object.entries(parsed).map(([k, v]) => `${esc(k)}=${esc(String(v))}`).join(' · ')
+        }
+      } catch { detail = '' }
+      return `<div class="card tight">
+        <div class="between">
+          <strong>${esc(AUDIT_LABELS[r.action] ?? r.action)}</strong>
+          <span class="meta">${esc(when)} UTC</span>
+        </div>
+        <p class="meta">${esc(auditActor(r.actor))}${r.target_id ? ` · ${esc(r.target_id)}` : ''}
+          ${detail ? ` · ${detail}` : ''}${r.ip_hash ? ` · source ${esc(r.ip_hash)}` : ''}</p>
+      </div>`
+    }).join('')
+    : '<div class="card empty">Nothing recorded yet for this site.</div>'
+
+  return layout(`Audit — ${site.name}`, `
+    <div class="between"><h1>Audit log</h1>
+      <a href="/sites/${esc(site.id)}" class="meta">← ${esc(site.name)}</a></div>
+    <p class="sub">Every administrative and destructive action on this site, including
+      reads of your feedback by the operator's admin API. Feedback text is never copied
+      here, and source addresses are stored only as a coarse hash.</p>
+    ${list}
+    <p class="meta">Kept for 365 days, then removed by the same nightly job that prunes reports.</p>`,
+    { who })
 }
 
 export function confirmDeleteSitePage(

@@ -5,6 +5,8 @@ export const DONE_RETENTION_DAYS = 180
 export const OPEN_RETENTION_DAYS = 365
 /** After this, a reporter's email is dropped regardless of the report's status. */
 export const EMAIL_RETENTION_DAYS = 90
+/** The audit log has its own clock, longer than reports' own retention. */
+export const AUDIT_RETENTION_DAYS = 365
 export const DEMO_RETENTION_HOURS = 24
 export const DEMO_SITE_ID = 'site_demo'
 
@@ -13,10 +15,12 @@ export interface PruneResult {
   openDeleted: number
   emailsCleared: number
   demoDeleted: number
+  auditDeleted: number
   doneCutoff: number
   openCutoff: number
   emailCutoff: number
   demoCutoff: number
+  auditCutoff: number
 }
 
 export const LAST_PRUNE_KEY = 'last_prune_at'
@@ -56,6 +60,7 @@ export async function pruneReports(env: Env, now: number = Date.now()): Promise<
   const openCutoff = now - OPEN_RETENTION_DAYS * 24 * 60 * 60 * 1000
   const emailCutoff = now - EMAIL_RETENTION_DAYS * 24 * 60 * 60 * 1000
   const demoCutoff = now - DEMO_RETENTION_HOURS * 60 * 60 * 1000
+  const auditCutoff = now - AUDIT_RETENTION_DAYS * 24 * 60 * 60 * 1000
 
   const done = await env.DB
     .prepare("DELETE FROM reports WHERE status = 'done' AND created_at < ?")
@@ -78,15 +83,21 @@ export async function pruneReports(env: Env, now: number = Date.now()): Promise<
     .prepare('DELETE FROM reports WHERE site_id = ? AND created_at < ?')
     .bind(DEMO_SITE_ID, demoCutoff).run()
 
+  const audit = await env.DB
+    .prepare('DELETE FROM audit WHERE ts < ?')
+    .bind(auditCutoff).run()
+
   const result: PruneResult = {
     doneDeleted: done.meta?.changes ?? 0,
     openDeleted: open.meta?.changes ?? 0,
     emailsCleared: emails.meta?.changes ?? 0,
     demoDeleted: demo.meta?.changes ?? 0,
+    auditDeleted: audit.meta?.changes ?? 0,
     doneCutoff,
     openCutoff,
     emailCutoff,
     demoCutoff,
+    auditCutoff,
   }
 
   // Written last and unconditionally: the point of this row is "the cron ran to
@@ -106,6 +117,7 @@ export async function pruneReports(env: Env, now: number = Date.now()): Promise<
       openDeleted: result.openDeleted,
       emailsCleared: result.emailsCleared,
       demoDeleted: result.demoDeleted,
+      auditDeleted: result.auditDeleted,
     }), now).run()
 
   return result
