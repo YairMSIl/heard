@@ -17,7 +17,7 @@ interface Call { sql: string; args: unknown[] }
  * the *cutoffs and predicates*, which is where a retention bug deletes data it
  * should have kept.
  */
-function fakeDb(changes = [3, 11, 5, 7]) {
+function fakeDb(changes = [3, 11, 5, 7, 2]) {
   const calls: Call[] = []
   let i = 0
   const env = {
@@ -76,7 +76,7 @@ describe('pruneReports', () => {
   it('reports zero when D1 gives no change count', async () => {
     const { env } = fakeDb([])
     const result = await pruneReports(env, NOW)
-    expect(result).toMatchObject({ doneDeleted: 0, openDeleted: 0, emailsCleared: 0, demoDeleted: 0 })
+    expect(result).toMatchObject({ doneDeleted: 0, openDeleted: 0, emailsCleared: 0, demoDeleted: 0, auditDeleted: 0 })
   })
 
   it('bounds untriaged reports at a year (S8.2)', async () => {
@@ -98,6 +98,14 @@ describe('pruneReports', () => {
     expect(sweep.sql).not.toContain('status')
     expect(sweep.args[0]).toBe(NOW - 90 * 24 * 60 * 60 * 1000)
     expect(result.emailsCleared).toBe(5)
+  })
+
+  it('prunes the audit log on its own 365-day clock', async () => {
+    const { env, calls } = fakeDb()
+    const r = await pruneReports(env, NOW)
+    const sweep = calls.find(c => c.sql.includes('DELETE FROM audit'))!
+    expect(sweep.args[0]).toBe(NOW - 365 * 24 * 60 * 60 * 1000)
+    expect(r.auditDeleted).toBe(2)
   })
 
   it('orders the cutoffs so each rule is stricter than the last', async () => {
@@ -142,15 +150,15 @@ describe('pruneReports', () => {
     await pruneReports(env, NOW)
     const counts = calls.find(c => c.args[0] === LAST_PRUNE_COUNTS_KEY)!
     expect(JSON.parse(counts.args[1] as string))
-      .toEqual({ doneDeleted: 3, openDeleted: 11, emailsCleared: 5, demoDeleted: 7 })
+      .toEqual({ doneDeleted: 3, openDeleted: 11, emailsCleared: 5, demoDeleted: 7, auditDeleted: 2 })
   })
 
   it('still records a run that deleted nothing', async () => {
-    const { env, calls } = fakeDb([0, 0, 0, 0])
+    const { env, calls } = fakeDb([0, 0, 0, 0, 0])
     await pruneReports(env, NOW)
     const counts = calls.find(c => c.args[0] === LAST_PRUNE_COUNTS_KEY)!
     expect(JSON.parse(counts.args[1] as string))
-      .toEqual({ doneDeleted: 0, openDeleted: 0, emailsCleared: 0, demoDeleted: 0 })
+      .toEqual({ doneDeleted: 0, openDeleted: 0, emailsCleared: 0, demoDeleted: 0, auditDeleted: 0 })
     expect(calls.some(c => c.args[0] === LAST_PRUNE_KEY)).toBe(true)
   })
 })

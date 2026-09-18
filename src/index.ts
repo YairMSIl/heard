@@ -48,6 +48,7 @@ import {
   quoteUntrusted,
 } from './admin'
 import {
+  auditPage,
   confirmDeleteSitePage,
   errorPage,
   landingPage,
@@ -57,6 +58,7 @@ import {
   sitesPage,
 } from './views'
 import { resolvesToPublicAddress } from './dns'
+import { ADMIN_API_ACTOR, CRON_ACTOR, loadAudit, recordAudit } from './audit'
 import { securityHeaders } from './security-headers'
 import { WIDGET_JS } from './widget'
 import { WIDGET_VERSION, widgetIntegrity } from './widget-version'
@@ -356,6 +358,16 @@ app.get('/api/admin/reports', async c => {
 
   // Provenance travels with the data. It costs nothing and, unlike a filter, it
   // survives being pasted into a transcript.
+  c.executionCtx.waitUntil(recordAudit(c.env, {
+    actor: ADMIN_API_ACTOR,
+    action: 'admin.reports.read',
+    targetType: 'site',
+    targetId: site,
+    siteId: site,
+    ip: c.req.header('cf-connecting-ip'),
+    detail: { count: (results ?? []).length, since, status },
+  }))
+
   const reports = (results ?? []).map(r => ({
     ...r,
     message: quoteUntrusted(r.message),
@@ -389,6 +401,15 @@ app.post('/api/admin/reports/:id/status', async c => {
 
   await c.env.DB.prepare('UPDATE reports SET status = ? WHERE id = ?')
     .bind(parsed.value, report.id).run()
+  c.executionCtx.waitUntil(recordAudit(c.env, {
+    actor: ADMIN_API_ACTOR,
+    action: 'report.status',
+    targetType: 'report',
+    targetId: report.id,
+    siteId: report.site_id,
+    ip: c.req.header('cf-connecting-ip'),
+    detail: { from: report.status, to: parsed.value },
+  }))
   return c.json({ ok: true, id: report.id, status: parsed.value, previousStatus: report.status })
 })
 
@@ -657,6 +678,14 @@ app.post('/sites/:id/webhook', async c => {
     await c.env.DB.prepare(
       'UPDATE sites SET webhook_url = NULL, webhook_failures = 0, webhook_disabled_at = NULL, webhook_verified_at = NULL WHERE id = ?',
     ).bind(site.id).run()
+    c.executionCtx.waitUntil(recordAudit(c.env, {
+      actor: c.get('ownerId'),
+      action: 'webhook.cleared',
+      targetType: 'site',
+      targetId: site.id,
+      siteId: site.id,
+      ip: c.req.header('cf-connecting-ip'),
+    }))
     return c.redirect(`/sites/${site.id}?saved=1`, 302)
   }
 
@@ -679,7 +708,22 @@ app.post('/sites/:id/webhook', async c => {
   await c.env.DB.prepare(
     'UPDATE sites SET webhook_url = ?, webhook_failures = 0, webhook_disabled_at = NULL, webhook_verified_at = ? WHERE id = ?',
   ).bind(parsed.value, Date.now(), site.id).run()
+  c.executionCtx.waitUntil(recordAudit(c.env, {
+    actor: c.get('ownerId'),
+    action: 'webhook.verified',
+    targetType: 'site',
+    targetId: site.id,
+    siteId: site.id,
+    ip: c.req.header('cf-connecting-ip'),
+    detail: { host: new URL(parsed.value).host },
+  }))
   return c.redirect(`/sites/${site.id}?saved=1`, 302)
+})
+
+app.get('/sites/:id/audit', async c => {
+  const site = await loadSite(c, c.req.param('id'), c.get('ownerId'))
+  if (!site) return c.html(errorPage(404, 'No such site.'), 404)
+  return c.html(auditPage(site, await loadAudit(c.env, site.id), c.get('ownerLabel')))
 })
 
 app.post('/sites/:id/settings', async c => {
@@ -708,6 +752,19 @@ app.post('/sites/:id/settings', async c => {
       (daily as { value: number | null }).value,
       site.id,
     ).run()
+  c.executionCtx.waitUntil(recordAudit(c.env, {
+    actor: c.get('ownerId'),
+    action: 'site.settings',
+    targetType: 'site',
+    targetId: site.id,
+    siteId: site.id,
+    ip: c.req.header('cf-connecting-ip'),
+    detail: {
+      origins: allowedOriginList((origins as { value: string | null }).value).length,
+      hourlyCap: (hourly as { value: number | null }).value,
+      dailyCap: (daily as { value: number | null }).value,
+    },
+  }))
   return c.redirect(`/sites/${site.id}?saved=1`, 302)
 })
 
@@ -717,6 +774,16 @@ app.post('/sites/:id/secret', async c => {
 
   const secret = newWebhookSecret()
   await c.env.DB.prepare('UPDATE sites SET webhook_secret = ? WHERE id = ?').bind(secret, site.id).run()
+  // The secret itself is never logged — only that it was replaced.
+  c.executionCtx.waitUntil(recordAudit(c.env, {
+    actor: c.get('ownerId'),
+    action: 'webhook.secret.regenerate',
+    targetType: 'site',
+    targetId: site.id,
+    siteId: site.id,
+    ip: c.req.header('cf-connecting-ip'),
+    detail: { replaced: Boolean(site.webhook_secret) },
+  }))
 
   // Rendered rather than redirected: a redirect would have to carry the secret
   // in a URL, which lands in history, logs and referrers.
@@ -737,6 +804,14 @@ app.post('/reports/:id/delete', async c => {
   if (!report) return c.html(errorPage(404, 'No such report.'), 404)
 
   await c.env.DB.prepare('DELETE FROM reports WHERE id = ?').bind(report.id).run()
+  c.executionCtx.waitUntil(recordAudit(c.env, {
+    actor: c.get('ownerId'),
+    action: 'report.delete',
+    targetType: 'report',
+    targetId: report.id,
+    siteId: report.site_id,
+    ip: c.req.header('cf-connecting-ip'),
+  }))
   return c.redirect(`/sites/${report.site_id}?deleted=report`, 302)
 })
 
@@ -759,6 +834,20 @@ app.post('/sites/:id/delete', async c => {
     return c.html(confirmDeleteSitePage(site, 0, c.get('ownerLabel'),
       'That did not match the site name, so nothing was deleted.'), 400)
   }
+
+  // Written before the delete: the audit row is the only thing that will still
+  // say this site existed, so it must not depend on the delete succeeding.
+  const reportCount = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM reports WHERE site_id = ?')
+    .bind(site.id).first<{ n: number }>()
+  await recordAudit(c.env, {
+    actor: c.get('ownerId'),
+    action: 'site.delete',
+    targetType: 'site',
+    targetId: site.id,
+    siteId: site.id,
+    ip: c.req.header('cf-connecting-ip'),
+    detail: { name: site.name, reportsDeleted: reportCount?.n ?? 0 },
+  })
 
   // Reports first: if the second statement fails the site still exists, which is
   // a recoverable state. The reverse would orphan rows.
@@ -785,6 +874,15 @@ app.post('/reports/:id/status', async c => {
 
   await c.env.DB.prepare('UPDATE reports SET status = ? WHERE id = ?')
     .bind(status as ReportStatus, report.id).run()
+  c.executionCtx.waitUntil(recordAudit(c.env, {
+    actor: c.get('ownerId'),
+    action: 'report.status',
+    targetType: 'report',
+    targetId: report.id,
+    siteId: report.site_id,
+    ip: c.req.header('cf-connecting-ip'),
+    detail: { to: status },
+  }))
   return c.redirect(`/sites/${report.site_id}`, 302)
 })
 
@@ -802,8 +900,20 @@ export default {
   /** Daily retention cron; see wrangler.toml [triggers]. */
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(
-      pruneReports(env).then(result => {
+      pruneReports(env).then(async result => {
         console.log('retention', JSON.stringify(result))
+        await recordAudit(env, {
+          actor: CRON_ACTOR,
+          action: 'retention.prune',
+          targetType: 'deployment',
+          detail: {
+            doneDeleted: result.doneDeleted,
+            openDeleted: result.openDeleted,
+            emailsCleared: result.emailsCleared,
+            demoDeleted: result.demoDeleted,
+            auditDeleted: result.auditDeleted,
+          },
+        })
       }),
     )
     ctx.waitUntil(
