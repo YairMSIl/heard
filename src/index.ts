@@ -59,6 +59,7 @@ import {
 import { resolvesToPublicAddress } from './dns'
 import { securityHeaders } from './security-headers'
 import { WIDGET_JS } from './widget'
+import { WIDGET_VERSION, widgetIntegrity } from './widget-version'
 
 const SESSION_COOKIE = 'heard_session'
 const OAUTH_STATE_COOKIE = 'heard_oauth_state'
@@ -144,14 +145,26 @@ app.get('/health', async c => {
   }, db === 'ok' ? 200 : 503)
 })
 
+const widgetHeaders = (cacheControl: string) => ({
+  'content-type': 'application/javascript; charset=utf-8',
+  'cache-control': cacheControl,
+  'access-control-allow-origin': '*',
+})
+
+/**
+ * The moving alias. Short cache because it is versionless and embedded on pages
+ * we do not control, so a bad deploy has to age out fast.
+ */
 app.get('/widget.js', c =>
-  c.body(WIDGET_JS, 200, {
-    'content-type': 'application/javascript; charset=utf-8',
-    // Long cache with a short revalidate window: the widget is versionless and
-    // embedded on pages we do not control, so a bad deploy must age out fast.
-    'cache-control': 'public, max-age=300, s-maxage=300',
-    'access-control-allow-origin': '*',
-  }))
+  c.body(WIDGET_JS, 200, widgetHeaders('public, max-age=300, s-maxage=300')))
+
+/**
+ * The pinned path. Immutable for a year so an embedder can add an `integrity`
+ * attribute and have the browser refuse anything else — which is the control
+ * that actually bounds a bad deploy, rather than trusting us not to ship one.
+ */
+app.get(`/widget/${WIDGET_VERSION}.js`, c =>
+  c.body(WIDGET_JS, 200, widgetHeaders('public, max-age=31536000, immutable')))
 
 // The report endpoint is called from arbitrary origins by design.
 app.use('/api/report', cors({ origin: '*', allowMethods: ['POST', 'OPTIONS'], allowHeaders: ['content-type'], maxAge: 86400 }))
@@ -614,6 +627,7 @@ async function renderSite(
     widgetKey: await selfWidgetKey(c.env),
     usage: (await peekSite(c.env, site.id, site)).usage,
     caps: resolveCaps(site),
+    integrity: await widgetIntegrity(),
     revealedSecret: extra.revealedSecret,
     flash: extra.error || extra.ok ? { error: extra.error, ok: extra.ok } : undefined,
   })
