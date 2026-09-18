@@ -1,11 +1,12 @@
 # Heard — threat model
 
-**First reviewed at** commit `f5e3dba`. **Verified at** commit `960df56`
-(hardening round 1, `175dd3e..960df56`).
+**First reviewed at** commit `f5e3dba`. **Last verified at** commit `7beec8c`
+(hardening round 2, `0f22780..7beec8c`).
 **Date** 2026-09-17. **Reviewer** Security Analyst (AI agent).
 **Method** Source review of `src/`, `migrations/`, `wrangler.toml`, CI; abuse
 reproduced against `wrangler dev` in a throwaway clone; read-only `GET`s against
-production for response headers and `/health`. No load tests, no floods, and
+production for response headers and `/health`. Since `3e78f64` the toolchain
+needs Node 22 — `nvm exec 22` before `wrangler`, or the clone will not start. No load tests, no floods, and
 nothing written to the production database.
 
 Findings that say **verified** were reproduced. Findings that say **by
@@ -21,21 +22,31 @@ record shows what the risk was, not only what is left.
 | # | Finding | Status | Commit |
 | --- | --- | --- | --- |
 | S1 | Prompt injection into the operating agent | fixed | `4ee5bfa` |
-| S2 | Write-quota and storage exhaustion | fixed | `ebb02a4` |
-| S3 | Webhook reflection and SSRF targets | fixed | `f23a30a` |
+| S2 | Write-quota and storage exhaustion | fixed | `ebb02a4`, `7beec8c` |
+| S3 | Webhook reflection and SSRF targets | fixed | `f23a30a`, `033845f` |
 | S4 | No Origin enforcement on `POST /api/report` | fixed | `175dd3e` |
-| S5 | `ADMIN_TOKEN` handling | **partial** | `fdd1978` |
+| S5 | `ADMIN_TOKEN` handling | fixed | `fdd1978`, `0f22780` |
 | S6 | No security response headers | fixed | `41c2b92` |
 | S7 | CSRF rests on `SameSite=Lax` | fixed | `41c2b92` |
-| S8 | Retention does not bound the data that matters | open | — |
-| S9 | `/health` error detail and unauthenticated D1 read | open | — |
-| S10 | `x-forwarded-for` as a rate-limit key | open | — |
-| S11 | Session, OAuth and supply-chain residuals | open | — |
-| S12 | Webhook target guard does not resolve DNS | open (new) | — |
-| S13 | Two `/health` keys from one degraded counter | open (new) | — |
-| S14 | Per-source share penalises shared egress addresses | open (new) | — |
-| S15 | Site limit tells owners to delete a site; no delete exists | open (new) | — |
-| S16 | Docs describe a sign-in that no longer works | open (new) | — |
+| S8 | Retention does not bound the data that matters | fixed | `38fdf5a` |
+| S9 | `/health` error detail and unauthenticated D1 read | fixed | `873e6d0` |
+| S10 | `x-forwarded-for` as a rate-limit key | fixed | `873e6d0` |
+| S11 | Session, OAuth and supply-chain residuals | **partial** | `873e6d0`, `12d63c6`, `3e78f64` |
+| S12 | Webhook target guard does not resolve DNS | fixed | `033845f` |
+| S13 | Two `/health` keys from one degraded counter | fixed | `39d7b5a` |
+| S14 | Per-source share penalises shared egress addresses | fixed | `39d7b5a` |
+| S15 | Site limit tells owners to delete a site; no delete exists | fixed | `38fdf5a` |
+| S16 | Docs describe a sign-in that no longer works | fixed | `0f22780` |
+| S17 | Deployment ceiling made a global outage cheap | fixed | `7beec8c` |
+| S18 | Widget blast radius, with no technical gate on deploys | open (new) | — |
+| S19 | No audit log of administrative or destructive actions | open (new) | — |
+
+Every finding raised against the application itself is now closed. S11 is
+partial by choice: its dependency and supply-chain half is done, and the
+session-revocation half is an accepted residual described in that section. S18
+and S19 are structural rather than defects — they were surfaced by a posture
+review on 2026-09-18 and are the two things a determined attacker or an incident
+would now reach first.
 
 R1–R6, the review notes raised against the first rate-limiter commit, are all
 fixed in `ebb02a4` and `960df56` and re-verified; the two that produced lasting
@@ -132,7 +143,7 @@ documentation the Owner owns.
 ## S2 — Unauthenticated write-quota and storage exhaustion
 
 **Severity: high.** **Verified** (rate-limit bypass); quota arithmetic **by inspection**.
-**Status: fixed** in `ebb02a4`, re-verified.
+**Status: fixed** in `ebb02a4`; the deployment ceiling it introduced was itself a finding (S17), fixed in `7beec8c`. Defaults are now 60/hour and 500/day per site, 1000/hour and 5000/day for the deployment.
 
 At `f5e3dba` the only throttle on `POST /api/report` is `reportRateLimiter`, an
 **in-memory, per-isolate, per-IP** fixed window of 10/minute. `src/ratelimit.ts`
@@ -181,7 +192,7 @@ authentication of any kind. Storage grows monotonically in the meantime, with
 ## S3 — Webhook reflection, amplification, and unfiltered SSRF targets
 
 **Severity: medium-high.** **Verified** locally; production behaviour toward
-**Status: fixed** in `f23a30a`, re-verified. One residual, now tracked as S12.
+**Status: fixed** in `f23a30a`. Its residual, S12, is fixed in `033845f`.
 private address space **unverified** (platform-dependent).
 
 `validateWebhookUrl` checks only that the URL parses and is `http(s)`. There is no
@@ -268,7 +279,7 @@ non-browser client can send any `Origin` it likes.
 ## S5 — `ADMIN_TOKEN`: in the URL, in the cookie verbatim, shared, unrevocable
 
 **Severity: medium.** **Verified.**
-**Status: partial** in `fdd1978`. The mechanism is fixed and re-verified; the credential separation is not yet in effect. See the status note below.
+**Status: fixed** in `0f22780`. The mechanism landed in `fdd1978`; `0f22780` dropped the `?? ADMIN_TOKEN` fallback that had kept the separation opt-in, and production now reports `adminApiTokenSeparate: true`.
 
 The break-glass path is `GET /login?token=<ADMIN_TOKEN>`, and the cookie it sets
 *is* the token:
@@ -381,7 +392,7 @@ cross-site navigation.
 ## S8 — Retention does not bound the data that matters, and is unproven in production
 
 **Severity: low-medium.** Retention rules **by inspection**; the production
-**Status: open.** Untouched by round 1.
+**Status: fixed** in `38fdf5a`. Open reports are bounded at 365 days, visitor email is scrubbed at 90, and owners can delete their own data. The production cron is confirmed running.
 observation is **verified but inconclusive**.
 
 `pruneReports` deletes `done` reports older than 180 days and everything on the
@@ -416,7 +427,7 @@ promise the deployment cannot yet evidence.
 ## S9 — `/health` leaks D1 error detail and is an unauthenticated database round-trip
 
 **Severity: low.** **By inspection.**
-**Status: open.** Untouched by round 1.
+**Status: fixed** in `873e6d0`. The D1 error message now goes to the log rather than to the caller, and `/health` is rate limited.
 
 On a D1 failure the handler returns `detail: err.message` to any caller, which can
 carry schema or infrastructure specifics. Separately, every unauthenticated
@@ -432,7 +443,7 @@ keep their detail. Apply the in-memory limiter to `/health`.
 ## S10 — `x-forwarded-for` as a rate-limit key
 
 **Severity: low as deployed.** **By inspection.**
-**Status: open.** Untouched by round 1; re-confirmed present at `960df56`.
+**Status: fixed** in `873e6d0`. The `x-forwarded-for` fallback is gone; an absent `cf-connecting-ip` is treated as unidentifiable rather than as a fresh bucket.
 
 ```js
 const ip = c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for') ?? 'unknown'
@@ -454,7 +465,7 @@ comment about isolate scope.
 ## S11 — Session, OAuth and supply-chain residuals
 
 **Severity: low.** **By inspection.**
-**Status: open.** Untouched by round 1.
+**Status: partial.** The supply-chain half is fixed — `npm audit` gates CI for both production and dev trees, Dependabot security updates are on, and the tree is clean. Session revocation granularity is unchanged and accepted: rotating `SESSION_SECRET` signs everyone out, which is still the only lever.
 
 - **Sessions.** `<ownerId>.<issuedAt>.<hmac>` with a 30-day life, verified with a
   constant-time compare, future timestamps rejected, and a deleted owner's valid
@@ -566,6 +577,7 @@ load-bearing without anyone noticing.
 ## S12 — The webhook target guard does not resolve DNS
 
 **Severity: low as deployed.** **Verified** that the guard is bypassable by name;
+**Status: fixed** in `033845f`. Hosts are resolved over DoH at save and refused when any answer is private; verified webhooks are re-challenged weekly.
 production egress behaviour **unverified**.
 
 `validateWebhookUrl` inspects the URL's host textually, so it catches literal
@@ -596,6 +608,7 @@ guard looking complete.
 ## S13 — `/health` reports one degraded counter under two names
 
 **Severity: low.** **Verified.**
+**Status: fixed** in `39d7b5a`. One `rateLimiterDegraded`, plus a genuinely distinct `webhookDeliveryDegraded` for the delivery cap that was previously counted nowhere.
 
 ```
 GET /health -> {... "rateLimiterDegraded":0, "rateLimitDegraded":0 ...}
@@ -621,6 +634,7 @@ give it the second key those two names imply.
 ## S14 — The per-source share penalises shared egress addresses
 
 **Severity: low-medium (availability, not confidentiality).** **Verified.**
+**Status: fixed** in `39d7b5a`. Sources are bucketed by IPv4 /24 and IPv6 /64, and the share is skipped entirely below a cap of 10. At the current 60/hour default a network gets 12/hour.
 
 `SOURCE_SHARE = 0.2` with `Math.max(1, Math.floor(limit * SOURCE_SHARE))` means
 one IP may take a fifth of a site's window. This is the right shape against an
@@ -649,6 +663,7 @@ it does not conclude the site is broken. The alternative is a deliberate
 ## S15 — The site limit tells owners to delete a site; nothing can delete a site
 
 **Severity: low.** **Verified.**
+**Status: fixed** in `38fdf5a`. Owner-scoped report and site deletion exist, so the message now describes something an owner can do.
 
 `SITES_PER_OWNER = 5` refuses the sixth site with *"You have reached the limit of
 5 sites. Delete one, or ask us to raise it."* There is no delete route for a site
@@ -671,6 +686,7 @@ anyone's.
 ## S16 — The documentation describes a sign-in that no longer works
 
 **Severity: low (operational).** **Verified.**
+**Status: fixed** in `0f22780`. `CLAUDE.md` documents POST-only login, and `ADMIN_API_TOKEN` is in both `.dev.vars.example` and the deploy checklist.
 
 S5 made token login POST-only, but `CLAUDE.md:26` still tells a developer to
 visit `http://localhost:8787/login?token=dev-token` for break-glass sign-in. That
@@ -690,6 +706,147 @@ falls back to `ADMIN_TOKEN` when unset and that production should set both.
 
 **Effort.** Trivial. (Docs sit outside this reviewer's write scope beyond
 `SECURITY.md` and `docs/`, so this one needs assigning.)
+
+---
+
+## Round 2 verification evidence
+
+Re-run at `9c9708b` and `7beec8c` in a throwaway clone, never in the shared
+`app/` tree. 264 tests and all three typecheck passes green under Node 22.
+
+- **S5** `0f22780` — `GET /login?token=<valid>` sets no cookie. `POST /login`
+  returns `heard_session=own_local.<issuedAt>.<hmac>`; the cookie is not the
+  token. The fallback is genuinely gone: with `ADMIN_API_TOKEN` set, the
+  dashboard token on `/api/admin/reports` is **401** where it used to be 200, and
+  the API token is refused as a dashboard login.
+- **S8** `38fdf5a` — seeded five aged reports on a non-demo site and ran the
+  cron. Exactly the specified outcome: a 400-day open report deleted, a 200-day
+  done report deleted, a 100-day open report kept **with its email scrubbed to
+  null**, a 10-day report untouched with its email, and a 100-day done report
+  kept.
+- **S9** `873e6d0` — the D1 error message no longer reaches the caller (it goes
+  to `console.error`), and `/health` is now rate limited: 10 requests through,
+  then 429.
+- **S10** `873e6d0` — twelve different spoofed `x-forwarded-for` values with no
+  `cf-connecting-ip` all landed in **one** bucket and throttled together at 10.
+  Forging the header buys nothing.
+- **S11** — `npm audit --audit-level=high` runs twice in CI (production tree and
+  full tree), the tree reports 0 vulnerabilities, Dependabot security updates are
+  enabled on the repository, and private vulnerability reporting is on.
+- **S12** `033845f` — `http://127.0.0.1.nip.io/hook` and `http://localtest.me/hook`
+  are now refused at save with *"resolves to a private address (127.0.0.1)"*.
+  Both were accepted and stored at `960df56`. A public host that does not answer
+  the challenge is still refused at the challenge step, as before.
+- **S13** `39d7b5a` — `/health` exposes `rateLimiterDegraded` and
+  `webhookDeliveryDegraded`, two counters measuring two different things.
+- **S14** `39d7b5a` — twelve addresses inside one `/24` shared a single bucket
+  and were cut off after 12, the exact share of a 60/hour cap; a different `/24`
+  and an IPv6 `/64` each had their own. With a cap of 5 (below the minimum of
+  10) the share was correctly skipped and all 5 were served, where the old code
+  would have floored one network to a single report per hour.
+- **S15** `38fdf5a` — deleting a report as its owner works; the same request
+  with a cross-site `Origin` is 403, and unauthenticated it redirects to `/login`
+  with the report left intact. Cross-*owner* deletion could not be reproduced
+  locally (one owner exists without completing OAuth); the route uses the same
+  owner-scoped join as the rest, so that part is by inspection.
+- **S16** `0f22780` — `.dev.vars.example` carries `ADMIN_API_TOKEN` with an
+  explanatory comment, `CLAUDE.md` documents the POST-only form and explicitly
+  notes that `GET /login?token=…` only renders it, and the deploy checklist
+  includes the new secret.
+
+## S17 — The deployment ceiling made a global outage cheap
+
+**Severity: high.** **By inspection** (control-flow ordering; the volume was
+deliberately not reproduced — that is the flood this reviewer may not run).
+**Status: fixed** in `7beec8c`.
+
+**Exploit scenario.** The deployment-wide ceiling was consumed *before* the
+per-source and per-site gates, so a request about to be refused had already
+spent global budget. At 10/min per address, roughly two addresses sustained more
+than the 1000/hour ceiling against any published public key, and every site on
+Heard then answered "Heard is at capacity right now"; about 5,000 requests
+bought the rest of the day.
+
+The ceiling exists to protect the D1 write quota. Causing a total outage
+previously took on the order of 100,000 writes and afterwards took about 5,000
+requests — **the control made the outage roughly twenty times cheaper**. It is
+structurally the same mistake as R1: a shared budget with a hard refusal and no
+per-source subdivision, one level up. It was introduced by the fix for S2 and
+missed in that review.
+
+**Fix.** Three parts, all present:
+
+1. `consumeDeployment` now runs **last**, after the per-source and per-site
+   gates, so an upstream refusal costs the shared pool nothing. The Builder's
+   `test/ceiling.test.ts` asserts this directly — *"a source-share refusal leaves
+   the deployment instance untouched"*.
+2. The ceiling is no longer all-or-nothing. Below 90% of a window it is
+   invisible. At or above 90% only a *heavy* tenant — one using more than 10% of
+   the window itself — is refused, reserving the remaining headroom for quiet
+   customers. Only a genuinely exhausted window refuses everyone. This is the
+   part that matters: it stops one loud site from being everyone's outage.
+3. `deploymentCeilingRefusals` on `/health` counts explicit refusals, kept
+   deliberately distinct from the degraded counters — "we checked and said no"
+   rather than "we could not check".
+
+**Residual.** A determined distributed attacker can still fill a window and
+reach the exhausted state, at which point everyone is refused. The reservation
+raises the cost and protects light tenants under pressure; it does not make the
+product immune to denial of service, and nothing at this tier would.
+
+## S18 — The widget's blast radius, with no technical gate on deploys
+
+**Severity: high, structural.** **Verified** (repository settings and headers);
+never exploited.
+**Status: open.** Raised 2026-09-18; no fix assigned yet.
+
+`/widget.js` executes inside every page that embeds Heard. It is versionless by
+design, so embedders cannot pin it with subresource integrity, and it is cached
+for five minutes. That makes it the widest-reach asset in the system: a bad
+deploy or a compromised Worker is arbitrary JavaScript running in every customer's
+page, in their origin, against their users.
+
+**Exploit scenario.** Not an application flaw — a blast-radius and authorisation
+one. `main` has no branch protection, no required reviews and no required status
+checks; CI runs tests but cannot block a push. The agent that writes the code
+also holds the deploy credentials, so a single compromised or mistaken step
+reaches every embedding site within the cache window. S1's controls reduce the
+chance of the agent being *talked* into it; nothing technical prevents it.
+
+**Fix spec.**
+
+1. Branch protection on `main` with required status checks — cheap, and it makes
+   CI a gate rather than a report.
+2. A versioned widget path (`/widget/v1.js`) alongside the current one, so an
+   embedder who wants to pin can, and a bad deploy cannot silently reach
+   everyone at once.
+3. Longer term, separate the credential that deploys from the one that commits,
+   so pushing code and shipping it are not the same authority.
+
+**Effort.** Trivial for 1, small for 2, medium for 3.
+
+## S19 — No audit log of administrative or destructive actions
+
+**Severity: medium.** **By inspection.**
+**Status: open.** Raised 2026-09-18; no fix assigned yet.
+
+Nothing records who read feedback over the admin API, who changed a report's
+status, who regenerated a webhook secret, or who deleted a site. After an
+incident there is nothing to reconstruct from, and the product cannot answer a
+customer asking "who saw my data".
+
+This sharpened when S15 shipped: deletion is now a real capability, and the
+destructive actions are precisely the unlogged ones. It also interacts with S1 —
+if an injection attempt ever did move the operating agent to act, there would be
+no record distinguishing that from ordinary operation.
+
+**Fix spec.** An append-only `audit` table: timestamp, actor (owner id or
+`admin-api`), action, target id, and source address. Write on secret
+regeneration, status change, deletion, settings change, and admin API reads.
+Never include report content. Expose it to the owner for their own sites, and
+prune it on the same cron with its own retention.
+
+**Effort.** Small.
 
 ---
 
@@ -729,15 +886,20 @@ Round 1 closed the original top five. What follows replaces it.
 
 ### Top 3 next
 
+Every finding against the application itself is closed. What is left is
+structural, and the ranking reflects blast radius rather than likelihood.
+
 | # | Finding | Why first | Effort |
 | --- | --- | --- | --- |
-| 1 | **S5 completion + S16** | The one item where a shipped fix is not yet true of the running system. `ADMIN_API_TOKEN` falls back to `ADMIN_TOKEN`, so the machine and human credentials are still one string in production, and the deploy docs never gained the new secret. Setting one secret and editing two files finishes a finding already paid for. | Trivial |
-| 2 | **S14** per-source share vs shared addresses | The only round 1 change that refuses *legitimate* users, and it does so silently from the visitor's point of view. Every NAT — office, school, carrier — is one visitor sharing six reports an hour, or one an hour under a small cap. Availability findings that fire without an attacker tend to be discovered by users first. | Small |
-| 3 | **S8 + S15** retention and deletion | The last cluster touching user data directly: non-`done` reports with visitor email are kept indefinitely, production has never been observed pruning, and the product now tells owners to delete a site while offering no way to do it. Constitution rule 2 points here. | Small→Medium |
+| 1 | **S18** widget blast radius and deploy gate | The widest-reach asset in the system has the weakest authorisation around changing it. Branch protection with required checks is an afternoon and turns CI from a report into a gate; a versioned widget path lets embedders pin. Nothing else on this list can affect a customer's own visitors. | Trivial→Small |
+| 2 | **S19** audit log | The only finding that gets *worse* with time rather than better: every day without it is a day that cannot be reconstructed. It became sharper when deletion shipped, since the destructive actions are the unlogged ones. | Small |
+| 3 | **S11** session revocation | The accepted residual worth revisiting before the owner count stops being single digits, not after. Today the only lever signs everyone out. | Small |
 
-S12 and S13 are cheap and can ride along with any of the above; S13 in particular
-should be fixed before a sensor is pointed at either `/health` key. S9, S10 and
-S11 remain trivial and unclaimed.
+Below that: the origin allow-list (S4) is off by default, so most owners have no
+protection against their key being planted elsewhere — worth considering a prompt
+in the dashboard rather than a silent default. And S17's residual stands: a
+distributed attacker can still exhaust a window, and no control at this tier
+changes that.
 
 ## Review triggers
 
