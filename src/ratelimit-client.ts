@@ -50,6 +50,16 @@ let webhookDegradedCount = 0
 export const webhookDeliveryDegradedCount = () => webhookDegradedCount
 export const recordWebhookDeliveryDegraded = () => { webhookDegradedCount += 1 }
 
+/**
+ * Requests the deployment ceiling turned away. Distinct from the degraded
+ * counters: those mean "we could not check", this means "we checked and said
+ * no" — and a rising figure here is the product refusing real traffic, which
+ * someone should see long before a customer reports it.
+ */
+let ceilingRefusals = 0
+export const deploymentCeilingRefusalCount = () => ceilingRefusals
+export const recordDeploymentCeilingRefusal = () => { ceilingRefusals += 1 }
+
 async function call(
   env: Env,
   key: string,

@@ -13,6 +13,18 @@ export const DEPLOYMENT_DAILY_CAP = 5000
 export const DEPLOYMENT_HOURLY_CAP = 1000
 /** Sign-in is open to any GitHub account, so site creation needs its own ceiling. */
 export const SITES_PER_OWNER = 5
+
+/**
+ * Above this fraction of a deployment window, the ceiling starts refusing — but
+ * only the tenants responsible for the pressure.
+ */
+export const DEPLOYMENT_PRESSURE = 0.9
+/**
+ * A site using more than this share of a deployment window is "heavy". Below it,
+ * a site keeps being served until the ceiling is genuinely exhausted, so a quiet
+ * customer is not cut off because a loud one filled the day.
+ */
+export const SITE_RESERVED_SHARE = 0.1
 /**
  * One source may take at most this share of a site's window. The site-wide
  * number stays the ceiling; this stops a single address consuming all of it and
@@ -227,4 +239,62 @@ export function evaluateWindows(
     usage: usage.map(u => ({ ...u, count: u.count + 1 })),
     next,
   }
+}
+
+export interface CeilingDecision {
+  refuse: boolean
+  reason: 'exhausted' | 'heavy-tenant' | null
+  window: WindowName | null
+  retryAfterSeconds: number
+}
+
+/**
+ * Decides whether the deployment ceiling should refuse *this* request.
+ *
+ * The ceiling exists to protect the free tier from everyone at once, but applied
+ * bluntly it is a shared fate: one site filling the global window takes every
+ * other site down with it. So the ceiling cuts in two stages.
+ *
+ *  - **Exhausted** — the window is full. Everyone is refused; there is no budget
+ *    left to allocate fairly.
+ *  - **Under pressure** (>= 90% used) — only sites that are themselves using more
+ *    than 10% of the window are refused. The heavy tenant is cut first and the
+ *    remaining headroom is reserved for everyone else.
+ *
+ * Below pressure the ceiling is invisible. A degraded limiter reports no usage,
+ * which reads as "no pressure" and allows — consistent with failing open
+ * everywhere else.
+ */
+export function shouldRefuseAtCeiling(
+  deployment: { allowed: boolean; retryAfterSeconds: number; usage: WindowUsage[] },
+  siteUsage: WindowUsage[],
+): CeilingDecision {
+  if (!deployment.allowed) {
+    const blocked = deployment.usage.find(u => u.count >= u.limit) ?? deployment.usage[0] ?? null
+    return {
+      refuse: true,
+      reason: 'exhausted',
+      window: blocked?.name ?? null,
+      retryAfterSeconds: deployment.retryAfterSeconds,
+    }
+  }
+
+  for (const window of deployment.usage) {
+    if (window.limit <= 0) continue
+    const underPressure = window.count >= window.limit * DEPLOYMENT_PRESSURE
+    if (!underPressure) continue
+
+    const site = siteUsage.find(u => u.name === window.name)
+    if (!site) continue
+    if (site.count > window.limit * SITE_RESERVED_SHARE) {
+      return {
+        refuse: true,
+        reason: 'heavy-tenant',
+        window: window.name,
+        retryAfterSeconds: Math.max(1, Math.ceil((window.resetAt - Date.now()) / 1000)),
+      }
+    }
+  }
+
+  return { refuse: false, reason: null, window: null, retryAfterSeconds: 0 }
 }

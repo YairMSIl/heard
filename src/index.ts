@@ -13,9 +13,11 @@ import {
   consumeSiteSource,
   peekSite,
   rateLimitDegradedCount,
+  recordDeploymentCeilingRefusal,
+  deploymentCeilingRefusalCount,
   webhookDeliveryDegradedCount,
 } from './ratelimit-client'
-import { resolveCaps, SITES_PER_OWNER } from './limits'
+import { resolveCaps, shouldRefuseAtCeiling, SITES_PER_OWNER } from './limits'
 import {
   allowedOriginList,
   isOriginAllowed,
@@ -134,6 +136,7 @@ app.get('/health', async c => {
     // R2 renamed this; the old key stays one release so nothing reading it breaks.
     rateLimiterDegraded: rateLimitDegradedCount(),
     webhookDeliveryDegraded: webhookDeliveryDegradedCount(),
+    deploymentCeilingRefusals: deploymentCeilingRefusalCount(),
     // Boolean only: whether the two admin credentials are genuinely distinct.
     // Never the values, never a hint at their length.
     adminApiTokenSeparate: Boolean(c.env.ADMIN_API_TOKEN && c.env.ADMIN_API_TOKEN !== c.env.ADMIN_TOKEN),
@@ -192,15 +195,6 @@ app.post('/api/report', async c => {
     return c.json({ error: 'this site does not accept reports from that origin' }, 403)
   }
 
-  // Deployment-wide ceiling, checked alongside the site cap: per-site limits
-  // bound one abuser, this bounds all of them together and is what actually
-  // protects the free tier.
-  const deploymentLimit = await consumeDeployment(c.env)
-  if (!deploymentLimit.allowed) {
-    return tooMany(c, deploymentLimit.retryAfterSeconds,
-      'Heard is at capacity right now. Please try again later.')
-  }
-
   // Per-site caps come after the site is known, and before validation: a cap is
   // about how much of our capacity one site may consume, and a malformed body
   // consumes it just the same.
@@ -224,6 +218,26 @@ app.post('/api/report', async c => {
     }
     return tooMany(c, siteLimit.retryAfterSeconds,
       'This site is not accepting more feedback right now. Please try again later.')
+  }
+
+  // Deployment-wide ceiling, checked LAST of the limiters.
+  //
+  // It used to run before the per-source and per-site gates, which meant a
+  // request that was about to be refused anyway still spent global budget:
+  // roughly 5000 requests against any one public key could exhaust the whole
+  // deployment's day and take every other site down with it. A refusal upstream
+  // must cost the shared pool nothing, so this now runs only for requests that
+  // have already earned their slot.
+  const deploymentLimit = await consumeDeployment(c.env)
+  const ceiling = shouldRefuseAtCeiling(deploymentLimit, siteLimit.usage)
+  if (ceiling.refuse) {
+    recordDeploymentCeilingRefusal()
+    console.error('deployment ceiling refusal', JSON.stringify({
+      site: site.id, reason: ceiling.reason, window: ceiling.window,
+    }))
+    return tooMany(c, ceiling.retryAfterSeconds, ceiling.reason === 'heavy-tenant'
+      ? 'This site has used its share of Heard\'s capacity for now. Please try again later.'
+      : 'Heard is at capacity right now. Please try again later.')
   }
 
   const parsed = validateReportInput(body)
