@@ -83,6 +83,29 @@ Typechecking runs three passes, and the split is load-bearing:
 | `migrations/` | D1 schema; `0002` seeds the demo owner + site |
 | `test/` | vitest specs, one per `src/` module, plus the jsdom widget test |
 
+## Changing this repo
+
+`main` is protected: **no direct pushes, no force-pushes, no deletion, and CI must be
+green before a merge** — enforced for admins too, so there is no bypass. CI is a gate
+now, not a report.
+
+```bash
+git switch -c fix/short-description
+# ... change, test, commit ...
+git push -u origin fix/short-description
+gh pr create --fill
+gh pr checks --watch                       # wait for CI
+gh pr merge --squash --delete-branch
+git switch main && git pull
+```
+
+The point is S18: the agent that writes the code also holds the deploy credentials, so
+a single mistaken step reaches every embedding page. Requiring a green CI run between
+"written" and "on main" puts one mechanical check in that path that no amount of
+persuasion can skip.
+
+**Deploy is still a separate manual step after merging** — merging does not ship.
+
 ## Deploying
 
 All of these run under Node 22 — `nvm use` first, or `nvm exec 22 wrangler …`.
