@@ -155,6 +155,26 @@ export function parseAllowedOrigins(input: unknown): { ok: true; value: string |
   return { ok: true, value: origins.join('\n') }
 }
 
+/**
+ * Distinct origins a site's reports actually came from, newest first.
+ *
+ * Derived from `page_url`, which is visitor-supplied and therefore a hint, not
+ * evidence — it is good enough to *suggest* a lock, and deliberately not used to
+ * apply one. Anything unparseable is dropped rather than guessed at.
+ */
+export function observedOrigins(pageUrls: (string | null)[]): string[] {
+  const seen: string[] = []
+  for (const raw of pageUrls) {
+    if (!raw) continue
+    try {
+      const { origin, protocol } = new URL(raw)
+      if (protocol !== 'http:' && protocol !== 'https:') continue
+      if (!seen.includes(origin)) seen.push(origin)
+    } catch { /* not a URL; nothing to learn from it */ }
+  }
+  return seen
+}
+
 export function allowedOriginList(stored: string | null | undefined): string[] {
   return (stored ?? '').split('\n').map(o => o.trim()).filter(Boolean)
 }

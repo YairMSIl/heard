@@ -21,6 +21,7 @@ import { resolveCaps, shouldRefuseAtCeiling, SITES_PER_OWNER } from './limits'
 import {
   allowedOriginList,
   isOriginAllowed,
+  observedOrigins,
   parseAllowedOrigins,
   parseCap,
   truncateUserAgent,
@@ -638,6 +639,17 @@ async function loadReports(c: { env: Env }, siteId: string): Promise<ReportRow[]
   return results ?? []
 }
 
+/**
+ * Distinct origins in a site's recent reports. Bounded to the newest 500 so this
+ * stays one cheap indexed read on a page that already does several.
+ */
+async function siteObservedOrigins(c: { env: Env }, siteId: string): Promise<string[]> {
+  const { results } = await c.env.DB
+    .prepare('SELECT page_url FROM reports WHERE site_id = ? AND page_url IS NOT NULL ORDER BY created_at DESC LIMIT 500')
+    .bind(siteId).all<{ page_url: string | null }>()
+  return observedOrigins((results ?? []).map(r => r.page_url))
+}
+
 async function renderSite(
   c: Context<{ Bindings: Env; Variables: Vars }>,
   site: SiteRow,
@@ -649,6 +661,7 @@ async function renderSite(
     usage: (await peekSite(c.env, site.id, site)).usage,
     caps: resolveCaps(site),
     integrity: await widgetIntegrity(),
+    observedOrigins: await siteObservedOrigins(c, site.id),
     revealedSecret: extra.revealedSecret,
     flash: extra.error || extra.ok ? { error: extra.error, ok: extra.ok } : undefined,
   })

@@ -60,6 +60,8 @@ const STYLES = `
   .usage:last-of-type{margin-bottom:6px}
   .bar{height:6px;border-radius:3px;background:#e5e7eb;overflow:hidden;margin-top:6px}
   .bar span{display:block;height:100%;background:var(--ink)}
+  .notice{background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;padding:14px 16px;margin-bottom:12px}
+  .notice pre{margin-top:8px}
   button.danger{background:#b91c1c}
   button.ghost.danger{background:#fff;color:#b91c1c;border-color:#fca5a5}
   .hero{padding:64px 0 8px}
@@ -191,6 +193,8 @@ export interface SitePageOptions {
   caps?: { hourly: number; daily: number }
   /** SHA-384 of the widget, so the snippet can pin it. */
   integrity?: string | null
+  /** Distinct origins seen in this site's reports, for the S4 lock prompt. */
+  observedOrigins?: string[]
   /** Present only on the one response that created it; never re-readable. */
   revealedSecret?: string | null
   who?: string | null
@@ -204,7 +208,7 @@ export function sitePage(
   origin: string,
   opts: SitePageOptions = {},
 ): string {
-  const { revealedSecret, who, widgetKey, usage, caps, integrity, flash } = opts
+  const { revealedSecret, who, widgetKey, usage, caps, integrity, observedOrigins = [], flash } = opts
   const pinned = integrity
     ? `<script src="${origin}/widget/${WIDGET_VERSION}.js?key=${site.public_key}"\n        integrity="${integrity}" crossorigin="anonymous" defer><\/script>`
     : `<script src="${origin}/widget/${WIDGET_VERSION}.js?key=${site.public_key}" defer><\/script>`
@@ -243,10 +247,23 @@ export function sitePage(
     </div>
 
     <h2>Settings</h2>
+    ${allowedOriginList(site.allowed_origins).length === 0 && observedOrigins.length >= 3
+      ? `<div class="notice">
+          <strong>Reports are arriving from ${esc(observedOrigins.length)} different sites.</strong>
+          <p class="meta">Your public key is visible in your page source, so anyone can copy it and
+            file reports from anywhere. If you only embed Heard on your own domains, lock the key to
+            them — the list below is prefilled with what has actually been seen. Review it before
+            saving: an origin you do not recognise is the reason to lock, not a domain to allow.</p>
+          <pre>${esc(observedOrigins.join('\n'))}</pre>
+        </div>`
+      : ''}
     <form class="card" method="post" action="/sites/${esc(site.id)}/settings">
       <label for="allowed_origins">Allowed origins (one per line)</label>
       <textarea id="allowed_origins" name="allowed_origins" rows="3"
-        placeholder="https://example.com&#10;https://www.example.com">${esc(allowedOriginList(site.allowed_origins).join('\n'))}</textarea>
+        placeholder="https://example.com&#10;https://www.example.com">${esc(
+          allowedOriginList(site.allowed_origins).length === 0 && observedOrigins.length >= 3
+            ? observedOrigins.join('\n')
+            : allowedOriginList(site.allowed_origins).join('\n'))}</textarea>
       <p class="meta">Leave empty to accept reports from anywhere, which is the default.
         Locking the key to your domains stops someone lifting it from your page source and
         filing reports from elsewhere. It raises the cost of abuse rather than removing it:
