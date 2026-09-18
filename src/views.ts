@@ -1,6 +1,7 @@
 import type { ReportRow, SiteRow } from './types'
 import { allowedOriginList } from './validation'
 import { DEFAULT_DAILY_CAP, DEFAULT_HOURLY_CAP, type WindowUsage } from './limits'
+import { WIDGET_VERSION } from './widget-version'
 
 /** Every interpolation into HTML goes through this. No exceptions. */
 export function esc(value: unknown): string {
@@ -187,6 +188,8 @@ export interface SitePageOptions {
   /** Current rate-limit consumption, read without incrementing. */
   usage?: WindowUsage[]
   caps?: { hourly: number; daily: number }
+  /** SHA-384 of the widget, so the snippet can pin it. */
+  integrity?: string | null
   /** Present only on the one response that created it; never re-readable. */
   revealedSecret?: string | null
   who?: string | null
@@ -200,8 +203,11 @@ export function sitePage(
   origin: string,
   opts: SitePageOptions = {},
 ): string {
-  const { revealedSecret, who, widgetKey, usage, caps, flash } = opts
-  const snippet = `<script src="${origin}/widget.js?key=${site.public_key}" defer><\/script>`
+  const { revealedSecret, who, widgetKey, usage, caps, integrity, flash } = opts
+  const pinned = integrity
+    ? `<script src="${origin}/widget/${WIDGET_VERSION}.js?key=${site.public_key}"\n        integrity="${integrity}" crossorigin="anonymous" defer><\/script>`
+    : `<script src="${origin}/widget/${WIDGET_VERSION}.js?key=${site.public_key}" defer><\/script>`
+  const snippet = pinned
   const list = reports.length
     ? reports.map(reportCard).join('')
     : '<div class="card empty">No reports yet. Try the widget on your site or on <a href="/demo">/demo</a>.</div>'
@@ -223,7 +229,17 @@ export function sitePage(
     ${flash?.error ? `<div class="err">${esc(flash.error)}</div>` : ''}
 
     <h2>Embed snippet</h2>
-    <div class="card"><pre>${esc(snippet)}</pre></div>
+    <div class="card"><pre>${esc(snippet)}</pre>
+      <p class="meta">This is the pinned path: <code>/widget/${esc(WIDGET_VERSION)}.js</code> is
+        immutable and cached for a year, and the <code>integrity</code> attribute makes the
+        browser refuse the file if its contents ever differ. A breaking change ships as
+        <code>/widget/v2.js</code> rather than by changing this one.</p>
+      <details><summary>Prefer automatic updates instead?</summary>
+        <p class="meta">Use <code>${esc(origin)}/widget.js?key=${esc(site.public_key)}</code> —
+          same widget, no <code>integrity</code>, updates within five minutes of a release.
+          You trade the pin for not having to update the snippet.</p>
+      </details>
+    </div>
 
     <h2>Settings</h2>
     <form class="card" method="post" action="/sites/${esc(site.id)}/settings">
@@ -330,7 +346,7 @@ export const ISSUES_URL = `${REPO_URL}/issues`
  * behind a sign-up.
  */
 export function landingPage(origin: string, widgetKey?: string | null): string {
-  const snippet = `<script src="${origin}/widget.js?key=YOUR_PUBLIC_KEY" defer><\/script>`
+  const snippet = `<script src="${origin}/widget/${WIDGET_VERSION}.js?key=YOUR_PUBLIC_KEY" defer><\/script>`
   return layout('Feedback your visitors can actually send', `
     <div class="hero">
       <h1>Feedback your visitors<br>can actually send.</h1>

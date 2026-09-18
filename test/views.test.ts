@@ -33,9 +33,28 @@ describe('sitePage', () => {
     expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;')
   })
 
-  it('includes an embed snippet for the site key', () => {
+  it('includes a pinned embed snippet for the site key', () => {
     const html = sitePage(site, [], 'https://heard.example.com')
-    expect(html).toContain('https://heard.example.com/widget.js?key=pk_abc')
+    expect(html).toContain('https://heard.example.com/widget/v1.js?key=pk_abc')
+  })
+
+  it('shows the integrity attribute when a hash is available', () => {
+    const html = sitePage(site, [], 'https://h.test', { integrity: 'sha384-ABC123' })
+    expect(html).toContain('integrity=&quot;sha384-ABC123&quot;')
+    expect(html).toContain('crossorigin=&quot;anonymous&quot;')
+  })
+
+  it('still renders a usable snippet when no hash is available', () => {
+    // A failed digest must not leave the owner with a broken snippet.
+    const html = sitePage(site, [], 'https://h.test', { integrity: null })
+    expect(html).toContain('/widget/v1.js?key=pk_abc')
+    expect(html).not.toContain('integrity=')
+  })
+
+  it('offers the moving alias as the documented alternative', () => {
+    const html = sitePage(site, [], 'https://h.test')
+    expect(html).toContain('/widget.js?key=pk_abc')
+    expect(html).toMatch(/Prefer automatic updates/)
   })
 
   it('shows a signing secret only on the response that generated it', () => {
@@ -101,7 +120,7 @@ describe('landingPage', () => {
   })
 
   it('shows the embed snippet with a placeholder key, escaped', () => {
-    expect(html).toContain('https://heard.example.com/widget.js?key=YOUR_PUBLIC_KEY')
+    expect(html).toContain('https://heard.example.com/widget/v1.js?key=YOUR_PUBLIC_KEY')
     // The snippet must render as text, not execute as a tag: the placeholder
     // key may never appear inside a live <script src="...">.
     expect(html).toContain('&lt;script src=')
