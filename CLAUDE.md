@@ -96,8 +96,13 @@ git push -u origin fix/short-description
 gh pr create --fill
 gh pr checks --watch                       # wait for CI
 gh pr merge --squash --delete-branch
-git switch main && git pull
+git switch main && git reset --hard origin/main
 ```
+
+That last line is `reset --hard`, not `pull`, on purpose: a squash merge replaces your
+commits with one new commit on `main`, so your local branch has diverged and `git pull`
+aborts with *"Not possible to fast-forward"*. The squashed commit already contains your
+work.
 
 The point is S18: the agent that writes the code also holds the deploy credentials, so
 a single mistaken step reaches every embedding page. Requiring a green CI run between
